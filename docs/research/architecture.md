@@ -363,8 +363,8 @@ Syntax, in any comment style in the migration file, or as `[[contract]]` in conf
 
 `migration-guard: contract drop-column users.legacy_email -- both apps stopped reading it in v42`
 
-- **Scoped to an object and a rule.** No file-wide "allow all" (the prior art's `// CONTRACT:` covered the whole file; V,
-  `prior-art/the Payload-on-D1 app/the origin project's migration check:39-40`).
+- **Scoped to an object and a rule.** No file-wide "allow all" (the predecessor's `// CONTRACT:` covered the whole file; V, its
+  migration check, lines 39-40).
 - **A reason is required.** golangci-lint's `require-explanation` and Clippy's `allow_attributes_without_reason` enforce
   the same (V(sub)).
 - **Stale markers fail. MG001-MG003 and MG010-MG012 cannot be suppressed. Every accepted contract is listed in the PR
@@ -575,7 +575,7 @@ migrators (Payload, Prisma, Rails) in a sandbox, statement capture, CI timings.
 **(revised) Added by the review:**
 - **The mixed-version test's cost and reliability** were measured in `spike-31.md`: about one integration-suite run per
   live version (113 s on the Payload-on-D1 app, 1-4 s on small apps), no flakiness in about 177 runs. What remains: a team needs
-  tests that write and read the affected tables (the Payload-on-D1 app' SQL-level suite alone missed a dropped column), and Rails
+  tests that write and read the affected tables (the Payload-on-D1 app's SQL-level suite alone missed a dropped column), and Rails
   needs the pre-boot harness.
 - **Reference rules are per ORM and partial.** Rails and Prisma are understood; Django, Drizzle and Payload are not yet
   verified; raw SQL and query builders give "unknown", never "unused".

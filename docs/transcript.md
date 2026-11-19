@@ -1,6 +1,6 @@
 # Transcript: generalising the migration guard to any database
 
-Exported from the the Payload-on-D1 app Claude Code session a58d04c9 on 2026-11-19, starting at the question that started this project. Tool calls and their raw output are left out; the user's messages, Claude's replies and the research agents' reports are kept.
+Exported from Claude Code session a58d04c9 on 2026-11-19, starting at the question that started this project. Tool calls and their raw output are left out; the user's messages, Claude's replies and the research agents' reports are kept.
 
 ## User
 
@@ -456,7 +456,6 @@ A new Terminal window is open in `~/Desktop/migration-guard`, with your Claude s
 - **`CLAUDE.md`**: tells the new session to read the research first and to leave name, language and licence to you.
 - **`docs/research.md`**: the combined research report.
 - **`docs/transcript.md`**: this conversation from your question "can a tool be developed that is plug and play for any db, any target infra?" onward. It has your messages, my replies and both research agents' full reports; tool calls are left out.
-- **`docs/prior-art/the Payload-on-D1 app/`**: the migration check, release script and the origin project's decision record it grew out of.
 
 **Your agentic-browser suggestion worked.** I used the scraping pipeline's Lightpanda browser through `agent-browser` on the built site with test data:
 - **"2024 and older"** now lists 2 cars instead of an error.

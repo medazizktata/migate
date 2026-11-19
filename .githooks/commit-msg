@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# The commit-message rule in CLAUDE.md ("Commit messages: short"), the parts a script can check.
+set -euo pipefail
+msg=$(grep -v '^#' "$1" || true)
+subject=$(printf '%s\n' "$msg" | sed -n 1p)
+case "$subject" in Merge\ * | fixup!\ * | squash!\ * | Revert\ *) exit 0 ;; esac
+fail() {
+  printf 'commit-msg: %s\n  %s\n(rule: CLAUDE.md, "Commit messages: short")\n' "$1" "$subject" >&2
+  exit 1
+}
+[ -n "$subject" ] || fail "the subject is empty"
+[ "${#subject}" -le 72 ] || fail "the subject has ${#subject} characters; aim for 50, 72 at most"
+case "$subject" in *.) fail "the subject ends with a full stop" ;; esac
+case "$subject" in [A-Z]*) ;; *) fail "start the subject with a capital letter" ;; esac
+[ -z "$(printf '%s\n' "$msg" | sed -n 2p)" ] || fail "leave the second line blank"
+body=$(printf '%s\n' "$msg" | sed '1,2d' | grep -c . || true)
+[ "$body" -le 10 ] || fail "the body has $body lines; keep it to about 6 (details go in the task or the docs)"

@@ -2,7 +2,7 @@
 
 Date: 2026-11-19. The owner asked for the M0 design decisions to be checked by an agent with no context: no access to
 this repository's research, transcript, README, CLAUDE.md or backlog, only the decisions themselves, the predecessor
-code (`docs/prior-art/the Payload-on-D1 app/*.mjs`) and the open web. It was told to ask and research its own questions first, to
+code (its migration check and release script, since removed from this repository) and the open web. It was told to ask and research its own questions first, to
 assume every decision wrong until checked, and to cite everything. The brief is in the appendix, verbatim.
 
 **Labels.** **V** checked by the main session after the review (see section 3). **R** relayed from the blind agent,
@@ -106,7 +106,7 @@ details (ordering as built-in code), which produced one finding the architecture
 - **Assume every decision below is wrong until you have checked it against evidence you found yourself.**
 - Read-only everywhere. Do not post, comment, star, open issues or create accounts anywhere.
 - Do not read these paths; they would bias you: docs/research/, docs/transcript.md, README.md, CLAUDE.md, backlog/,
-  ~/.claude*/. You may read the predecessor code in docs/prior-art/the Payload-on-D1 app/*.mjs (not the ADR).
+  ~/.claude*/. You may read the predecessor code (its migration check and release script; not the ADR).
 - Web: WebSearch, WebFetch, curl, gh api (authenticated, read-only). Never use Chrome, Claude in Chrome, Playwright
   or chrome-devtools; lightpanda fetch --dump markdown <url> is allowed for JavaScript-built pages. Stop at login or
   bot walls; never spoof a user agent.

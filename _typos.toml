@@ -11,6 +11,5 @@ doub = "doub"   # SQLite's type-affinity rule: a declared type containing "DOUB"
 extend-exclude = [
   "docs/transcript.md",        # a recorded conversation: quoted text stays as it was
   "docs/research/bench/**",    # recorded data and third-party output
-  "docs/prior-art/**",         # copied from the Payload-on-D1 app as it was
   "Cargo.lock",
 ]

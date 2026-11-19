@@ -20,7 +20,6 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
   and validation data.
 - `docs/research/first-pass.md`: the first round (landscape, 21 migrators' history tables), with corrections at the top.
 - `docs/transcript.md`: the conversation this project came from, with the first round's research reports in full.
-- `docs/prior-art/the Payload-on-D1 app/`: the single-repo version it grew out of (the Payload-on-D1 app, Payload on Cloudflare D1), with its ADR.
 
 ## Use
 
@@ -73,7 +72,8 @@ Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--fo
 - Rust is pinned in `rust-toolchain.toml` (1.93.1, what rustup already has on the development Mac). `just doctor` shows
   which cargo, rustc, clippy and rustfmt your shell really uses; they should all match the pin (see "Known local issue").
 - `just` lists the usual commands: `just check`, `just test`, `just lint`, `just fmt`. Run `just hooks` once per clone to
-  enable the pre-commit hook (format, clippy, tests).
+  enable the hooks in `.githooks`: pre-commit (format, clippy, docs, tests) and commit-msg (the message rule in
+  `CLAUDE.md`). Skip it if your global `core.hooksPath` already calls a repository's `.githooks`.
 - The code follows `docs/architecture-decisions/0001-hexagonal-core.md`: a pure core, ports added only when needed.
 - `bash scripts/check.sh` runs every check, the same way CI does: rustfmt, clippy (lints and type checks, `-D warnings`),
   rustdoc, tests, the core dependency rule, cargo-deny (advisories, licences, sources), shellcheck, actionlint and typos.

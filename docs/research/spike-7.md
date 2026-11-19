@@ -50,7 +50,7 @@ Most of each figure is the migrator starting up.
 
 It holds for none of them as a blanket rule:
 
-- **the Payload-on-D1 app' Payload runner accepts no connection setting at all.** The database path is fixed by
+- **the Payload-on-D1 app's Payload runner accepts no connection setting at all.** The database path is fixed by
   a script of the app's (`<checkout>/<app>/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`);
   the only knob is `APP_DATA=mock|real`. The sandbox is the checkout itself. It needs Node 26, pnpm 12 and a full
   workspace install (10 s from a warm store, about 2.3 GB of `node_modules`).
