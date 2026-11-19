@@ -102,6 +102,12 @@ pub fn run(
             .map(|(k, v)| (k.clone(), vars(v))),
     );
     // The migrate command also gets the migrator's run mode; the config's own values still win.
+    // The project's own temp files (test runners, Wrangler) go in the run's folder, so its cleanup takes them too.
+    let scratch = tmp.0.join("tmp");
+    std::fs::create_dir_all(&scratch).map_err(|e| format!("{}: {e}", scratch.display()))?;
+    for var in ["TMPDIR", "TEMP", "TMP"] {
+        env.insert(var.into(), scratch.to_string_lossy().into_owned());
+    }
     let mut migrate_env = env.clone();
     migrate_env.extend(
         migrator

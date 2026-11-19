@@ -1118,3 +1118,22 @@ fn an_old_branch_migration_is_flagged_before_any_ledger_exists() {
     let (_, out, _) = r.check("wrangler-d1");
     assert!(!out.contains("MG004"), "{out}");
 }
+
+#[test]
+fn temp_files_the_project_makes_go_with_the_run() {
+    // Test runners and Wrangler write temp folders; they must not outlive the run.
+    let name = format!("migate-leftover-probe-{}", std::process::id());
+    let probe = format!(
+        "test = '''python3 -c 'import os, tempfile; open(os.path.join(tempfile.gettempdir(), \"{name}\"), \"w\").write(\"x\")' && python3 old_app.py'''"
+    );
+    let r = sandbox_repo(
+        &SANDBOX_TOML.replace("test = \"python3 old_app.py\"", &probe),
+        "ALTER TABLE users ADD COLUMN nickname TEXT;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        !std::env::temp_dir().join(&name).exists(),
+        "a temp file the test wrote outlived the run"
+    );
+}
