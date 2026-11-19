@@ -126,6 +126,29 @@ pub fn run(
         }
     }
     let before = migate_engine_sqlite::snapshot(&path).map_err(|e| e.to_string())?;
+    let sql_err = |e: migate_engine_sqlite::Error| e.to_string();
+    let invalid =
+        |why: String| format!("MG813 old-version-run-invalid: {why}. Nothing was checked");
+
+    if let Some(seed) = &cfg.seed {
+        let out = sh(&vars(seed), &base_dir, &env)?;
+        if !out.status.success() {
+            return Err(format!("the seed command failed:\n{}", tail(&out)));
+        }
+    }
+    // Calibration, before the check: the tests must pass on their own version's database.
+    if let Some(test) = &cfg.test {
+        eprintln!("migate: running the base version's tests on its own database first");
+        let out = sh(&vars(test), &base_dir, &env)?;
+        if !out.status.success() {
+            return Err(invalid(format!(
+                "the base version's tests fail on the database at {base}, before any new migration, so their \
+                 result after one would mean nothing:\n{}",
+                tail(&out)
+            )));
+        }
+    }
+    let rows_before = migate_engine_sqlite::row_counts(&path).map_err(sql_err)?;
 
     eprintln!("migate: migrating it to HEAD");
     let out = sh(&migrate, &head_dir, &env)?;
@@ -144,9 +167,23 @@ pub fn run(
         ));
     }
     findings.extend(classify(&diff(&before, &after)));
+    for (table, now) in migate_engine_sqlite::row_counts(&path).map_err(sql_err)? {
+        if let Some(&was) = rows_before.get(&table)
+            && now < was
+        {
+            findings.push(Finding::new(
+                "MG105",
+                Severity::Error,
+                format!("main.{table}"),
+                format!("{was} rows before the migrations, {now} after"),
+            ));
+        }
+    }
 
     match (&cfg.test, migrated) {
         (Some(test), true) => {
+            let history = migate_engine_sqlite::count_rows(&path, &migrator.history.query)
+                .map_err(sql_err)?;
             eprintln!("migate: running the base version's tests against it");
             let out = sh(&vars(test), &base_dir, &env)?;
             if !out.status.success() {
@@ -159,6 +196,27 @@ pub fn run(
                          database:\n{}",
                         tail(&out)
                     ),
+                ));
+                return Ok(findings);
+            }
+            // Calibration, after a pass: the database must still be the migrated one, and the tests must notice
+            // when its tables are gone.
+            let still =
+                migate_engine_sqlite::count_rows(&path, &migrator.history.query).unwrap_or(0);
+            if still < history {
+                return Err(invalid(format!(
+                    "the migration history went from {history} rows to {still} during the tests: they rebuilt the \
+                     database instead of using the migrated one"
+                )));
+            }
+            migate_engine_sqlite::drop_all_but(&path, &migrator.history.query).map_err(sql_err)?;
+            eprintln!("migate: checking the tests notice a database with its tables dropped");
+            if sh(&vars(test), &base_dir, &env)?.status.success() {
+                return Err(invalid(
+                    "the base version's tests still pass with every table but the migration history dropped, so they \
+                     never used the migrated database (a stub command, or a framework that makes its own test \
+                     database)"
+                        .into(),
                 ));
             }
         }

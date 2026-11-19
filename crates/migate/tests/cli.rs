@@ -468,6 +468,7 @@ const APPLY: &str = r#"import os, pathlib, sqlite3, sys
 if "DATABASE_URL" in os.environ:
     sys.exit("DATABASE_URL leaked into the sandbox: " + os.environ["DATABASE_URL"])
 con = sqlite3.connect(os.environ.get("D1_PATH", "local.db"), isolation_level=None)
+con.execute("PRAGMA foreign_keys = ON")  # D1 enforces foreign keys
 con.execute("CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY, name TEXT UNIQUE)")
 done = {r[0] for r in con.execute("SELECT name FROM d1_migrations")}
 for f in sorted(pathlib.Path("migrations").glob("*.sql")):
@@ -496,15 +497,28 @@ fn sandbox_repo(config: &str, second: &str) -> Repo {
     sandbox_repo_with(config, OLD_APP, second)
 }
 
+/// Rows a production database would hold: a user, and a post when the table exists.
+const SEED: &str = r#"import os, sqlite3
+c = sqlite3.connect(os.environ["D1_PATH"])
+c.execute("INSERT INTO users (id, email) VALUES (7, 's@x')")
+if c.execute("SELECT 1 FROM sqlite_schema WHERE name = 'posts'").fetchone():
+    c.execute("INSERT INTO posts (user_id) VALUES (7)")
+c.commit()
+"#;
+
+const INIT: &str = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);";
+
 fn sandbox_repo_with(config: &str, old_app: &str, second: &str) -> Repo {
+    sandbox_repo_full(config, old_app, INIT, second)
+}
+
+fn sandbox_repo_full(config: &str, old_app: &str, first: &str, second: &str) -> Repo {
     let r = Repo::new();
     r.write("migate.toml", config);
     r.write("apply.py", APPLY);
     r.write("old_app.py", old_app);
-    r.write(
-        "migrations/0001_init.sql",
-        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);",
-    );
+    r.write("seed.py", SEED);
+    r.write("migrations/0001_init.sql", first);
     r.commit("init");
     r.git(&["checkout", "-q", "-b", "pr"]);
     r.write("migrations/0002_change.sql", second);
@@ -653,4 +667,84 @@ fn sandbox_works_from_inside_a_git_hook() {
     ];
     let (code, out, err) = sandbox_check(&r, &env);
     assert_eq!(code, 0, "{out}{err}");
+}
+
+#[test]
+fn sandbox_refuses_a_test_command_that_never_uses_the_database() {
+    let r = sandbox_repo(
+        &SANDBOX_TOML.replace("python3 old_app.py", "true"),
+        "ALTER TABLE users DROP COLUMN legacy;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("MG813") && err.contains("never used the migrated database"),
+        "{err}"
+    );
+}
+
+#[test]
+fn sandbox_refuses_a_test_command_that_cannot_start() {
+    let r = sandbox_repo(
+        &SANDBOX_TOML.replace("python3 old_app.py", "no-such-test-runner"),
+        "SELECT 1;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("MG813") && err.contains("before any new migration"),
+        "{err}"
+    );
+}
+
+#[test]
+fn sandbox_refuses_tests_that_rebuild_the_database() {
+    // The tests empty the file and migrate it again from the base chain, as Django without --keepdb does.
+    let test = r#"python3 -c 'import os; open(os.environ[\"D1_PATH\"], \"w\").close()' && python3 apply.py && python3 old_app.py"#;
+    let r = sandbox_repo(
+        &SANDBOX_TOML.replace("python3 old_app.py", test),
+        "ALTER TABLE users ADD COLUMN nickname TEXT;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("MG813") && err.contains("rebuilt the database"),
+        "{err}"
+    );
+}
+
+#[test]
+fn sandbox_catches_a_data_migration_that_deletes_rows() {
+    // The seed leaves a user behind, as production would have one; the migration deletes it.
+    let seeded = SANDBOX_TOML.replace("test = ", "seed = \"python3 seed.py\"\ntest = ");
+    let r = sandbox_repo(&seeded, "DELETE FROM users;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG105")
+            && out.contains("main.users")
+            && out.contains("1 rows before the migrations, 0 after"),
+        "{out}"
+    );
+}
+
+#[test]
+fn sandbox_catches_a_rebuild_that_cascade_deletes_children() {
+    // drizzle-orm#4938: SQLite's copy-and-swap rebuild of a parent drops it, and ON DELETE CASCADE empties the child.
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users ON DELETE CASCADE);";
+    let rebuild = "CREATE TABLE users_new (id INTEGER PRIMARY KEY, email TEXT, legacy TEXT);
+INSERT INTO users_new SELECT id, email, legacy FROM users;
+DROP TABLE users;
+ALTER TABLE users_new RENAME TO users;";
+    let config = SANDBOX_TOML.replace("test = ", "seed = \"python3 seed.py\"\ntest = ");
+    let r = sandbox_repo_full(&config, OLD_APP, first, rebuild);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG105")
+            && out.contains("main.posts")
+            && out.contains("1 rows before the migrations, 0 after"),
+        "{out}"
+    );
 }

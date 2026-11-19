@@ -9,6 +9,7 @@
 //! [sandbox]
 //! env = { DATABASE_URL = "sqlite:///{db}" }   # how the project is told where the database is; {db} is its path
 //! setup = "npm ci"                             # run in each checkout first (a fresh checkout has no dependencies)
+//! seed = "npm run seed"                        # optional: rows for the data-loss check
 //! test = "npm test"                            # the base version's tests, run against the migrated database
 //! ```
 
@@ -45,6 +46,12 @@ pub struct Sandbox {
     /// Replaces the migrator's migrate command.
     pub migrate: Option<String>,
     pub setup: Option<String>,
+    /// Run in the base checkout after the base migrations, to put rows in the database; with the rows the base tests
+    /// leave behind, they show data a migration loses.
+    pub seed: Option<String>,
+    /// The base version's tests. Run three times: on the database at base (they must pass, or their verdict means
+    /// nothing), at head (the check), and after a pass, on a copy with every table but the migration history dropped
+    /// (they must fail, or they never used the database).
     pub test: Option<String>,
 }
 

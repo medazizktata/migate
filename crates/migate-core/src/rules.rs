@@ -78,6 +78,12 @@ pub const RULES: &[Rule] = &[
         axes: "BD",
     },
     Rule {
+        id: "MG105",
+        name: "rows-lost",
+        description: "A table has fewer rows after the migration than before, on a database holding the rows the base version's tests and seed wrote. A rebuild of a parent table with ON DELETE CASCADE children deletes the children this way.",
+        axes: "D",
+    },
+    Rule {
         id: "MG201",
         name: "drop-column",
         description: "A column was dropped. The running app still selects or inserts it, and its values are gone. Stop using it in one release, drop it in the next.",
@@ -219,6 +225,12 @@ pub const RULES: &[Rule] = &[
         id: "MG804",
         name: "sandbox-not-migrated",
         description: "The base migrations did not write to the throwaway database, so nothing was checked. Usually the configured variable is not the one the project reads.",
+        axes: "",
+    },
+    Rule {
+        id: "MG813",
+        name: "old-version-run-invalid",
+        description: "The base version's test run proves nothing: it fails on its own database, cannot start, rebuilt the database, or passes with the tables gone. Nothing was checked.",
         axes: "",
     },
     Rule {

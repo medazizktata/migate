@@ -98,6 +98,49 @@ pub fn count_rows(path: &Path, sql: &str) -> Result<usize, Error> {
     Ok(n)
 }
 
+/// The row count of every table in the database at `path` (namespace `main`), read through the read-only copy.
+pub fn row_counts(path: &Path) -> Result<BTreeMap<String, u64>, Error> {
+    check_file(path)?;
+    let copy = copy_of(&[("main", path)])?;
+    let tables: Vec<String> = copy
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    let mut counts = BTreeMap::new();
+    for t in tables {
+        let n: i64 = copy.query_row(&format!("SELECT count(*) FROM {}", quoted(&t)), [], |r| {
+            r.get(0)
+        })?;
+        counts.insert(t, u64::try_from(n).unwrap_or(0));
+    }
+    Ok(counts)
+}
+
+/// Drop every table and view in the database at `path` except those named in `keep` (a query, such as the migrator's
+/// history query). Writes to `path`: only for a throwaway database.
+pub fn drop_all_but(path: &Path, keep: &str) -> Result<(), Error> {
+    let kept: BTreeSet<String> = tokens(keep)
+        .iter()
+        .filter_map(|t| t.ident().map(str::to_ascii_lowercase))
+        .collect();
+    let conn = Connection::open(path)?;
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let objects: Vec<(String, String)> = conn
+        .prepare("SELECT type, name FROM sqlite_schema WHERE type IN ('view', 'table') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY type DESC")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (kind, name) in objects {
+        if !kept.contains(&name.to_ascii_lowercase()) {
+            conn.execute_batch(&format!(
+                "DROP {} {};",
+                kind.to_ascii_uppercase(),
+                quoted(&name)
+            ))?;
+        }
+    }
+    Ok(())
+}
+
 /// An in-memory copy of each file under its namespace, taken with SQLite's backup API from a read-only connection.
 fn copy_of(files: &[(&str, &Path)]) -> Result<Connection, Error> {
     let mut copy = Connection::open_in_memory()?;
