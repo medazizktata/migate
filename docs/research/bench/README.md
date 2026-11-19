@@ -25,6 +25,19 @@ hyperfine -N -w 5 -r 40 'hello/go/hello-go' 'hello/gosleep/hello-go-sleep5' 'nod
 Cargo builds on this machine go through the `CARGO_TARGET_DIR` wrapper in `~/.zshenv`; run them as
 `zsh -c 'cd <dir> && cargo build --release'`.
 
+## validation/ (problem validation, `../validation.md`)
+
+- `data/github_issue_counts.tsv`: issue counts per migrator and theme, with the exact search queries (tab separators
+  are written as literal `\t`).
+- `data/stackoverflow_counts.tsv`: Stack Overflow counts per tag and phrase.
+- `data/rubygems_yearly.tsv`, `pypi_*.tsv`: download histories used for the demand trend.
+- `data/repo_creation_counts.tsv`, `new2026_*.tsv`: GitHub repositories created per year for each search phrase.
+- `data/watch_halfyear.tsv`, `repos.tsv`, `native_feature_requests.tsv`: star-event and feature-request data.
+- `scripts/gh_counts.sh`, `scripts/so_counts.sh`: re-run the counts (`OUT=<dir>` sets the output folder; GitHub search
+  is rate-limited, so the script sleeps between calls). `txt.py` strips a fetched page to text.
+
+The fetched third-party pages and raw API responses (about 23 MB) are not committed.
+
 ## arch/ (architecture probes, `../architecture.md` §11)
 
 - `probe/sqlite-introspect.mjs`: full SQLite catalog read with node:sqlite, including partial and expression indexes and

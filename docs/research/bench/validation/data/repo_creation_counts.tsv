@@ -1,0 +1,20 @@
+migration linter	2022	3
+migration linter	2023	8
+migration linter	2024	5
+migration linter	2025	22
+migration linter	2026	126
+unsafe migrations	2022	3
+unsafe migrations	2023	1
+unsafe migrations	2024	0
+unsafe migrations	2025	5
+unsafe migrations	2026	41
+zero downtime migrations	2022	5
+zero downtime migrations	2023	8
+zero downtime migrations	2024	7
+zero downtime migrations	2025	47
+zero downtime migrations	2026	235
+schema drift	2022	4
+schema drift	2023	4
+schema drift	2024	2
+schema drift	2025	96
+schema drift	2026	1111

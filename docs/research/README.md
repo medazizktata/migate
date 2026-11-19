@@ -8,6 +8,7 @@ engine, the way RDS is one host of PostgreSQL; it may be among the first plug-in
 | `gap.md` | Who else does this, where each stops, what users complain about, what would make this a better wheel, market size |
 | `architecture.md` | Components, plug-in interfaces, the canonical schema model, the rule list, throwaway databases, hosts, the ledger |
 | `stack.md` | Which language, measured: start-up, schema reading, throwaway Postgres, drivers, parsers, distribution |
+| `validation.md` | Is the problem real and weighty: 41 classified incidents, GitLab's 101 migration incidents, the case against, kill criteria |
 | `first-pass.md` | The first round (landscape, 21 migrators' history tables), with corrections at the top |
 | `bench/` | The benchmark and probe sources behind the numbers, and the raw results |
 
@@ -15,6 +16,25 @@ engine, the way RDS is one host of PostgreSQL; it may be among the first plug-in
 (read the primary source or ran it), R (relayed) or U (unknown), and to calibrate every check both ways. The main session
 then re-checked what the conclusions rest on; each report ends with a "Checked by the main session" section listing
 exactly what was re-run and what is relayed.
+
+## 0. Validation verdict (`validation.md`)
+
+Kill criteria were fixed before searching; an incident census and a devil's advocate then ran in parallel.
+
+- **The problem is real and has weight.** 41 classified public incidents (2015-2026); GitLab alone labels 101 of its
+  production incidents as caused by a database migration. Demand for free checks is flat-to-growing.
+- **The costly, repeated class is breaking the app version still running:** Snowflake (13 h, 10 of 23 regions), GitHub
+  twice in August 2025, Deno, Buildkite, Val Town, GitLab.
+- **In those incidents the drop was intended; the running code still referenced the column.** A schema diff plus a
+  contract marker would have let GitHub's and Buildkite's migrations through. The check must ask "is the old app still
+  using this?"
+- **Most migration incidents are locks, timeouts and load** (7 of 10 at GitHub), which a schema diff cannot see.
+- **Edited and misordered migrations are friction more than outages.** One company postmortem (Tuist 2026).
+- **Small but new: AI agents writing migrations** (Buildkite's override was added by an LLM).
+
+So the design changes proposed in `validation.md` §3 lead the product with the N-1 gate, make it code-aware, harden
+contract markers, handle locks by integrating existing linters plus production checks, and make the order rule per
+migrator. They are proposals until the owner approves them.
 
 ## 1. The gap: real, but narrower than "a migration linter"
 
@@ -103,13 +123,33 @@ its users are not on Node, the user's migrate command runs as a separate process
 - **Competitor behaviour** is from their READMEs, docs and source, not from running them.
 - **npm download counts for 2026 are 2-20x the 2025 numbers, for unknown reasons**; they are used only as ratios.
 
-## 6. Decisions for the owner
+## 6. Decisions
 
-1. **Language:** Rust recommended; Go if contributor ease outweighs a multi-dialect parser.
-2. **Name:** `migration-guard` is a placeholder. Check the npm, crates.io, PyPI and GitHub names before choosing.
-3. **Licence:** Apache-2.0 suggested (matches sqlparser-rs; promises the checks stay free, which this market rewards).
-4. **Engine order:** the gap research suggests SQLite/D1 first as the build and dogfood target, PostgreSQL second and
+**Taken by the owner (2026-11-19):**
+- **Independent and pluggable into any system.** No vendor is a dependency of the core.
+- **The general solution first.** A GFS-dedicated feature (for example a rehearsal on a `gfs clone <source> <target>`
+  full copy, upstream GFS PR #201, still open) comes only once the core works for most databases, as a fork or an
+  optional adapter.
+- **Leaning to Rust** ("I'm pro Rust"); not yet formally confirmed.
+
+**Still open:**
+1. **Name:** `migration-guard` is a placeholder. Check the npm, crates.io, PyPI and GitHub names before choosing.
+2. **Licence:** Apache-2.0 suggested (matches sqlparser-rs; promises the checks stay free, which this market rewards).
+3. **Engine order:** the gap research suggests SQLite/D1 first as the build and dogfood target, PostgreSQL second and
    leading the public launch, then MySQL/MariaDB, then SQL Server; MongoDB gets the ledger and history layers only.
+4. **The design changes in `validation.md` §3.**
+5. **Revenue:** none stated. The paid market buys platforms, not CLIs (`validation.md` §2.4).
+
+**Ideas from the discussion, not yet in `architecture.md`:**
+- **Read-only production checks at release:** for each risky change, one count through the read-only connection the
+  tool already uses (rows where a new NOT NULL column is NULL, duplicates for a new UNIQUE, orphans for a new foreign
+  key, the longest value for a narrowed type, the catalog's row estimate for lock risk). Counts only; no data leaves
+  production; time-limited.
+- **Three levels of sandbox:** an empty throwaway database plus the production checks by default; an opt-in rehearsal on
+  a copy of production (`pg_dump`/`pg_restore`, a restored host snapshot, a Neon branch, later a GFS full clone); the
+  report says which level produced each finding.
+- **Hexagonal edges around a functional core:** ports only where two real implementations or a test double exist;
+  migrators stay data files; a CI check keeps database drivers out of the core crate.
 
 ## 7. Next steps that cut the most risk
 

@@ -1,0 +1,5 @@
+{
+	"message": "API rate limit exceeded for user ID 197629269. If you reach out to GitHub Support for help, please include the request ID FA19:2B260D:3621EB4:5189071:6AFE5751 and timestamp 2026-11-19 01:56:33 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https:\/\/docs.github.com\/en\/site-policy\/github-terms\/github-terms-of-service)",
+	"documentation_url": "https://docs.github.com/en/rest/using-the-rest-api/getting-started-with-the-rest-api#rate-limiting",
+	"status": "403"
+}
