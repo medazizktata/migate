@@ -1,4 +1,4 @@
-# migate (folder still `migration-guard`): project notes for Claude
+# migate: project notes for Claude
 
 Read `README.md`, then `docs/research/README.md` (and the reports it links) and `docs/transcript.md` before proposing
 anything: they hold the research, the design and the owner's direction (any database and any host; D1 is one host of

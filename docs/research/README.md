@@ -148,7 +148,7 @@ its users are not on Node, the user's migrate command runs as a separate process
   layers only.
 - **Name: `migate`.** Free on npm, crates.io and Homebrew; taken on PyPI, so the pip package is `migate-cli`.
 
-**Still open:** renaming the repository folder from `migration-guard` (it also moves the local Claude memory path).
+The repository folder was renamed from `migration-guard` to `migate` the same day.
 
 **Ideas from the discussion, not yet in `architecture.md`:**
 - **Read-only production checks at release:** for each risky change, one count through the read-only connection the

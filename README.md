@@ -6,7 +6,7 @@ migration that would break the running app is stopped before it ships. It also s
 production ran it, from running out of order or being silently skipped, and from disagreeing with production's own
 history.
 
-Status: research and decisions done, nothing built yet. The repository folder is still named `migration-guard`.
+Status: research and decisions done, nothing built yet. (Earlier documents call it `migration-guard`, its working name.)
 Licence: Apache-2.0 (`LICENSE`). Start here:
 
 - `docs/research/README.md`: the summary: the gap, the validation, the architecture, the stack, what is not verified,
@@ -31,6 +31,5 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
 - Rust; Apache-2.0; pure open source, no revenue.
 
 ## Open
-- Renaming the repository folder to `migate`.
 - `docs/research/architecture.md` still describes the design before the validation and the blind review; updating it is
   the next task.
