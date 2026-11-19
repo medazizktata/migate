@@ -24,7 +24,7 @@ pub struct Common {
     /// Ledger file, relative to the project directory [default: migate-ledger.json]
     #[arg(long)]
     pub ledger: Option<String>,
-    /// Settings file [default: <root>/migate.toml, if present]
+    /// Settings file (default: `<root>/migate.toml`, if present)
     #[arg(long)]
     pub config: Option<PathBuf>,
 }
