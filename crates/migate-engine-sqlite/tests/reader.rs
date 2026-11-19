@@ -421,3 +421,43 @@ fn bad_namespace_names_are_refused() {
         );
     }
 }
+
+#[test]
+fn two_real_databases_diff_into_the_expected_rules() {
+    use migate_core::diff::{classify, diff};
+    let base = build(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT, status TEXT DEFAULT 'a', bio TEXT);
+         CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users, body TEXT CHECK (body <> ''));
+         CREATE VIEW active AS SELECT id FROM users WHERE status = 'a';",
+    )
+    .snapshot()
+    .unwrap();
+    // What a typical migration does: SQLite's own ALTERs plus a new table, an index and a dropped view.
+    let head = build(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT, status TEXT DEFAULT 'a', bio TEXT);
+         CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users, body TEXT CHECK (body <> ''));
+         CREATE VIEW active AS SELECT id FROM users WHERE status = 'a';
+         ALTER TABLE users DROP COLUMN legacy;
+         ALTER TABLE users ADD COLUMN nickname TEXT;
+         CREATE UNIQUE INDEX users_email ON users (email);
+         CREATE TABLE audit (id INTEGER PRIMARY KEY, at TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users);
+         DROP VIEW active;",
+    )
+    .snapshot()
+    .unwrap();
+    let mut found: Vec<(&str, String)> = classify(&diff(&base, &head))
+        .into_iter()
+        .map(|f| (f.rule, f.object))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            ("MG201", "main.users.legacy".to_string()),
+            ("MG210", "main.users.nickname".to_string()),
+            ("MG302", "main.users.users_email".to_string()),
+            ("MG501", "main.active".to_string()),
+        ],
+        "renumbered columns (bio moves up) and the new table's contents must not be findings"
+    );
+}

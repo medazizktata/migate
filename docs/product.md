@@ -199,8 +199,9 @@ planned before large-database support is claimed.
 | Spikes: real migration tools in a throwaway database; the old-app test on Django, Rails and Payload | done (`research/spike-7.md`, `research/spike-31.md`) |
 | Migration record and order rules, six migration-tool definitions | built and tested in the core |
 | `migate check` and `migate ledger record`: the migration record and order checks on a real repository, no database needed | built and tested (shown on a clone of a real Payload app) |
-| The SQLite schema reader (and a throwaway SQLite database), producing the shared schema model | built and tested |
-| The Postgres reader, the schema diff and rules, the old-app runner, production checks, PR comment | planned (backlog) |
+| The SQLite schema reader (and a throwaway SQLite database), producing the shared schema model | built and tested; several database files and deferrable foreign keys included |
+| The schema diff and 23 breaking-change rules (drops, NOT NULL, narrowing, defaults, constraints, views, triggers, enums) | built and tested in the core; not yet run by `migate check` |
+| The Postgres reader, the old-app runner, production checks, PR comment | planned (backlog) |
 | First public release | not yet |
 
 Name: migate. Licence: Apache-2.0. Language: Rust.

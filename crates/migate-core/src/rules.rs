@@ -1,5 +1,7 @@
-//! The rule catalogue: permanent IDs, a short name and a description for every rule the core enforces today
-//! (`docs/research/architecture.md` §6). IDs are never reused or renumbered.
+//! The rule catalogue: permanent IDs, a short name, a description and the risk axes of every rule the core enforces
+//! today (`docs/research/architecture.md` §6). IDs are never reused or renumbered.
+
+use crate::Severity;
 
 /// One rule's documentation, used by reporters (SARIF needs it for every rule it mentions).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7,6 +9,23 @@ pub struct Rule {
     pub id: &'static str,
     pub name: &'static str,
     pub description: &'static str,
+    /// What the change risks, as letters: `B` breaks the running (old) app, `L` locks, `D` loses data, `F` may fail on
+    /// rows production already has. Empty for rules about migration files and the ledger, which decide their own level.
+    pub axes: &'static str,
+}
+
+impl Rule {
+    /// The level a schema rule reports at (§6.2): an error if it breaks the old app or loses data, a warning if it only
+    /// locks or may fail on existing rows (the sandbox is empty, so it cannot know), otherwise a note.
+    pub fn severity(&self) -> Severity {
+        if self.axes.contains(['B', 'D']) {
+            Severity::Error
+        } else if self.axes.contains(['L', 'F']) {
+            Severity::Warning
+        } else {
+            Severity::Note
+        }
+    }
 }
 
 pub const RULES: &[Rule] = &[
@@ -14,36 +33,181 @@ pub const RULES: &[Rule] = &[
         id: "MG001",
         name: "applied-migration-edited",
         description: "A migration production already ran was edited. Production keeps the old version; add a new migration instead.",
+        axes: "",
     },
     Rule {
         id: "MG002",
         name: "applied-migration-removed",
         description: "A migration production already ran was removed from the repository. Restore its file.",
+        axes: "",
     },
     Rule {
         id: "MG003",
         name: "ledger-rewritten",
         description: "A ledger entry was rewritten or removed compared with the base branch. The ledger is append-only.",
+        axes: "",
     },
     Rule {
         id: "MG004",
         name: "migration-out-of-order",
         description: "A pending migration sorts before the last one production ran. Depending on the migration tool it runs out of order or is silently skipped forever.",
+        axes: "",
     },
     Rule {
         id: "MG005",
         name: "migration-graph-inconsistent",
         description: "The migration dependency graph has several heads or a missing parent.",
+        axes: "",
     },
     Rule {
         id: "MG006",
         name: "duplicate-migration-version",
         description: "Several migrations share one version; some tools treat the second as already applied.",
+        axes: "",
     },
     Rule {
         id: "MG007",
         name: "applied-migration-comment-edit",
         description: "Only comments or layout changed in a migration production already ran. Harmless unless the migration tool checksums the whole file.",
+        axes: "",
+    },
+    Rule {
+        id: "MG101",
+        name: "drop-table",
+        description: "A table was dropped. The running app still reads and writes it, and its rows are gone.",
+        axes: "BD",
+    },
+    Rule {
+        id: "MG201",
+        name: "drop-column",
+        description: "A column was dropped. The running app still selects or inserts it, and its values are gone. Stop using it in one release, drop it in the next.",
+        axes: "BLD",
+    },
+    Rule {
+        id: "MG203",
+        name: "add-required-column-without-default",
+        description: "A NOT NULL column without a default was added. Inserts from the running app, which does not know the column, fail; on a table with rows the migration itself can fail.",
+        axes: "BF",
+    },
+    Rule {
+        id: "MG204",
+        name: "set-not-null",
+        description: "A column became NOT NULL. Writes of NULL from the running app fail, and the migration fails if production has NULLs.",
+        axes: "BLF",
+    },
+    Rule {
+        id: "MG205",
+        name: "narrow-type",
+        description: "A column's type or size narrowed. Values production holds may not fit (the migration fails or truncates), and the running app may write values that no longer fit.",
+        axes: "BLDF",
+    },
+    Rule {
+        id: "MG206",
+        name: "change-type",
+        description: "A column's type or collation changed without narrowing. It can rewrite the table.",
+        axes: "L",
+    },
+    Rule {
+        id: "MG207",
+        name: "drop-default",
+        description: "A column lost its default. Inserts from the running app that omit the column now fail or write NULL.",
+        axes: "B",
+    },
+    Rule {
+        id: "MG208",
+        name: "change-generated-or-identity",
+        description: "A generated or identity column was added or changed. It can rewrite the table.",
+        axes: "L",
+    },
+    Rule {
+        id: "MG209",
+        name: "change-default",
+        description: "A column's default changed. The running app, and anything with a cached schema, may rely on the old value.",
+        axes: "B",
+    },
+    Rule {
+        id: "MG210",
+        name: "add-column",
+        description: "A column was added. Usually safe; the mixed-version test decides whether the running app copes.",
+        axes: "",
+    },
+    Rule {
+        id: "MG301",
+        name: "add-check",
+        description: "A CHECK constraint was added or changed. Writes from the running app may violate it, and existing rows may already.",
+        axes: "BLF",
+    },
+    Rule {
+        id: "MG302",
+        name: "add-unique",
+        description: "A UNIQUE constraint or unique index was added or changed. Writes from the running app may collide, and existing rows may already.",
+        axes: "BLF",
+    },
+    Rule {
+        id: "MG303",
+        name: "add-foreign-key",
+        description: "A foreign key was added or changed. Writes from the running app may break it, and existing rows may already.",
+        axes: "BLF",
+    },
+    Rule {
+        id: "MG304",
+        name: "drop-constraint",
+        description: "A constraint was dropped. Not a breaking change, but data it used to guard can now go wrong.",
+        axes: "",
+    },
+    Rule {
+        id: "MG305",
+        name: "change-primary-key",
+        description: "A primary key was added or changed. Existing rows may break it, and the running app may rely on the old key.",
+        axes: "BLF",
+    },
+    Rule {
+        id: "MG402",
+        name: "drop-index",
+        description: "An index was dropped or changed. Queries that used it may slow down.",
+        axes: "",
+    },
+    Rule {
+        id: "MG501",
+        name: "drop-view",
+        description: "A view was dropped. The running app may still query it.",
+        axes: "B",
+    },
+    Rule {
+        id: "MG502",
+        name: "change-view",
+        description: "A view's definition changed. The running app may rely on its old columns or rows.",
+        axes: "B",
+    },
+    Rule {
+        id: "MG503",
+        name: "add-trigger",
+        description: "A trigger was added. It can reject or change writes the running app makes.",
+        axes: "B",
+    },
+    Rule {
+        id: "MG504",
+        name: "drop-or-change-trigger",
+        description: "A trigger was dropped or changed. The running app may rely on what it did.",
+        axes: "B",
+    },
+    Rule {
+        id: "MG505",
+        name: "drop-or-change-routine",
+        description: "A routine was dropped or its arguments changed. The running app may still call the old signature.",
+        axes: "B",
+    },
+    Rule {
+        id: "MG601",
+        name: "remove-enum-value",
+        description: "An enum value was removed or renamed. The running app may still write it, and rows that hold it no longer fit.",
+        axes: "BD",
+    },
+    Rule {
+        id: "MG603",
+        name: "drop-sequence",
+        description: "A sequence was dropped. The running app may still take values from it.",
+        axes: "B",
     },
 ];
 
@@ -69,15 +233,19 @@ mod tests {
                     && r.id[2..].chars().all(|c| c.is_ascii_digit())
             );
             assert!(!r.name.is_empty() && !r.description.is_empty());
+            assert!(r.axes.chars().all(|c| "BLDF".contains(c)), "{}", r.id);
         }
     }
 
     #[test]
     fn every_rule_the_core_emits_is_catalogued() {
-        // Grep-free: the rules the ledger and order modules emit are listed here; a new one must be added.
+        // The rules the ledger and order modules emit are listed here; the classifier lists its own.
         for id in [
             "MG001", "MG002", "MG003", "MG004", "MG005", "MG006", "MG007",
         ] {
+            assert!(rule(id).is_some(), "{id} missing from the catalogue");
+        }
+        for id in crate::diff::EMITTED {
             assert!(rule(id).is_some(), "{id} missing from the catalogue");
         }
         assert!(rule("MG999").is_none());
