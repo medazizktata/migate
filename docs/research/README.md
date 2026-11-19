@@ -12,6 +12,7 @@ engine, the way RDS is one host of PostgreSQL; it may be among the first plug-in
 | `blind-review.md` | A context-free agent's review of the M0 decisions, what was verified, and the owner's decisions after it |
 | `spike-7.md` | Spike: Payload, Prisma, Django and Rails through the two-checkout sandbox on SQLite and Postgres |
 | `spike-31.md` | Spike: what the mixed-version test costs and catches (Django, Rails, the Payload-on-D1 app) |
+| `interview-kit.md` | Kit for 5-10 owner-run team interviews: guide, screener, outreach drafts, where to find teams, 30 public accounts (not interviews), decision rules |
 | `first-pass.md` | The first round (landscape, 21 migrators' history tables), with corrections at the top |
 | `bench/` | The benchmark and probe sources behind the numbers, and the raw results |
 
