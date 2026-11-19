@@ -29,7 +29,11 @@ impl Repo {
     }
 
     fn git(&self, args: &[&str]) {
+        // A pre-commit hook exports these; they would point the test's git at the hook's repository.
         let status = Command::new("git")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_WORK_TREE")
             .arg("-C")
             .arg(&self.dir)
             .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
@@ -866,4 +870,106 @@ fn a_contract_without_a_reason_or_matching_nothing_fails() {
         assert_eq!(code, 2, "{second}: {out}{err}");
         assert!(out.contains("error   MG901"), "{second}: {out}");
     }
+}
+
+fn worktrees(r: &Repo) -> usize {
+    let list = Command::new("git")
+        .arg("-C")
+        .arg(&r.dir)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&list.stdout)
+        .matches("worktree ")
+        .count()
+}
+
+fn run_folders(pid: u32) -> usize {
+    let prefix = format!("migate-run-{pid}-");
+    fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .count()
+}
+
+#[test]
+fn an_interrupted_sandbox_run_stops_its_command_and_removes_everything() {
+    // The setup command is slow; it would leave a file behind if it outlived the interrupt.
+    // `{dir}` is the run's database folder, removed with the run, so the file lands in the repository instead.
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (started, late) = (r.dir.join("started"), r.dir.join("late"));
+    r.write(
+        "migate.toml",
+        &SANDBOX_TOML.replace(
+            "test = ",
+            &format!(
+                "setup = \"touch {} && sleep 2 && touch {}\"\ntest = ",
+                started.display(),
+                late.display()
+            ),
+        ),
+    );
+    r.commit("slow setup");
+    let child = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .arg("check")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Interrupt only once the slow command runs, or there is nothing for the handler to stop.
+    for _ in 0..200 {
+        if started.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(started.exists(), "the setup command never started");
+    assert_eq!(
+        worktrees(&r),
+        3,
+        "both checkouts exist before the interrupt"
+    );
+    let pid = child.id();
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("interrupted"));
+    assert_eq!(worktrees(&r), 1);
+    assert_eq!(run_folders(pid), 0);
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    assert!(!late.exists(), "the setup command outlived the interrupt");
+}
+
+#[test]
+fn a_run_cleans_up_what_a_killed_run_left_behind() {
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    // What `kill -9` leaves: a run folder of a process that no longer exists, holding a registered worktree.
+    let dead = 4_294_967; // above any pid_max
+    let left = std::env::temp_dir().join(format!("migate-run-{dead}-{}", std::process::id()));
+    r.git(&[
+        "worktree",
+        "add",
+        "--quiet",
+        "--detach",
+        &left.join("base").to_string_lossy(),
+        "main",
+    ]);
+    assert_eq!(worktrees(&r), 2);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!left.exists(), "the dead run's folder is still there");
+    assert_eq!(worktrees(&r), 1);
 }

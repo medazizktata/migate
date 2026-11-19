@@ -5,9 +5,16 @@
 //! serving traffic meets after the deploy (`docs/research/spike-7.md`, `spike-31.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard, Once, PoisonError};
+use std::time::Duration;
+
+use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
 
 use migate_core::contract;
 use migate_core::diff::{classify, diff};
@@ -42,7 +49,9 @@ pub fn run(
     root: &Path,
     base: &str,
 ) -> Result<Vec<Finding>, String> {
+    on_signals();
     let tmp = TempDir::create()?;
+    sweep(root, &tmp.0);
     let dir = tmp.0.join("db");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let db = dir.join("sandbox.db");
@@ -295,15 +304,31 @@ fn locate(database: Option<String>, db: &Path) -> Result<Option<PathBuf>, String
 }
 
 // shortcut: commands run through `sh` with no time limit; Windows and a timeout when someone needs them.
+/// Each command runs in its own process group, so an interrupt can stop it and everything it started.
 fn sh(command: &str, dir: &Path, env: &BTreeMap<String, String>) -> Result<Output, String> {
-    Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .current_dir(dir)
-        .env_clear()
-        .envs(env)
-        .output()
-        .map_err(|e| format!("cannot run `{command}`: {e}"))
+    let child = {
+        let mut l = live();
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .current_dir(dir)
+            .env_clear()
+            .envs(env)
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot run `{command}`: {e}"))?;
+        l.groups.push(child.id());
+        child
+    };
+    let id = child.id();
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("cannot run `{command}`: {e}"));
+    live().groups.retain(|g| *g != id);
+    out
 }
 
 /// The last lines of a command's output, for the report.
@@ -336,12 +361,123 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// What an interrupted run must undo: running commands' process groups, worktrees (with their repository), folders.
+/// The lock is held while each is made or undone, and by the signal handler until it exits, so the two never race.
+#[derive(Debug)]
+struct Live {
+    groups: Vec<u32>,
+    worktrees: Vec<(PathBuf, PathBuf)>,
+    dirs: Vec<PathBuf>,
+}
+
+static LIVE: Mutex<Live> = Mutex::new(Live {
+    groups: Vec::new(),
+    worktrees: Vec::new(),
+    dirs: Vec::new(),
+});
+
+fn live() -> MutexGuard<'static, Live> {
+    LIVE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// On SIGINT, SIGTERM or SIGHUP (Ctrl-C, a cancelled CI job, a closed terminal): stop the running command, remove the
+/// worktrees and folders, exit 3. Without it the process dies at once and nothing is removed (test drive 1).
+fn on_signals() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let Ok(mut signals) = Signals::new([SIGINT, SIGTERM, SIGHUP]) else {
+            return;
+        };
+        std::thread::spawn(move || {
+            if signals.forever().next().is_some() {
+                let mut l = live();
+                for g in &l.groups {
+                    stop_group(*g);
+                }
+                for (dir, root) in l.worktrees.drain(..) {
+                    remove_worktree(&root, &dir);
+                }
+                for d in l.dirs.drain(..) {
+                    let _ = std::fs::remove_dir_all(d);
+                }
+                eprintln!("migate: interrupted; the sandbox run was removed. Nothing was checked");
+                std::process::exit(3);
+            }
+        });
+    });
+}
+
+/// SIGTERM to a process group, then SIGKILL if it is still there after two seconds.
+fn stop_group(group: u32) {
+    let signal = |sig: &str| {
+        Command::new("kill")
+            .args([sig, &format!("-{group}")])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    signal("-TERM");
+    for _ in 0..20 {
+        if !signal("-0") {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    signal("-KILL");
+}
+
+fn remove_worktree(root: &Path, dir: &Path) {
+    if git(
+        root,
+        &["worktree", "remove", "--force", &dir.to_string_lossy()],
+    )
+    .is_err()
+    {
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = git(root, &["worktree", "prune"]);
+    }
+}
+
+/// Remove what runs killed outright left behind (SIGKILL, a crash, power loss): this user's run folders whose process
+/// is gone, then this repository's records of worktrees that no longer exist.
+fn sweep(root: &Path, own: &Path) {
+    let Ok(uid) = std::fs::metadata(own).map(|m| m.uid()) else {
+        return;
+    };
+    let me = std::process::id();
+    for entry in std::fs::read_dir(std::env::temp_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(pid) = name
+            .strip_prefix("migate-run-")
+            .and_then(|rest| rest.split('-').next())
+            .and_then(|p| p.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let mine = entry.metadata().is_ok_and(|m| m.uid() == uid);
+        let alive = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if mine && pid != me && !alive {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+    let _ = git(root, &["worktree", "prune"]);
+}
+
 /// A detached worktree at `rev`, removed on drop.
 #[derive(Debug)]
 struct Checkout(PathBuf, PathBuf);
 
 impl Checkout {
     fn add(root: &Path, rev: &str, dir: &Path) -> Result<Checkout, String> {
+        let mut l = live();
         git(
             root,
             &[
@@ -354,16 +490,16 @@ impl Checkout {
             ],
         )
         .map_err(|e| format!("cannot check out `{rev}`: {e}"))?;
+        l.worktrees.push((dir.to_path_buf(), root.to_path_buf()));
         Ok(Checkout(dir.to_path_buf(), root.to_path_buf()))
     }
 }
 
 impl Drop for Checkout {
     fn drop(&mut self) {
-        let _ = git(
-            &self.1,
-            &["worktree", "remove", "--force", &self.0.to_string_lossy()],
-        );
+        let mut l = live();
+        remove_worktree(&self.1, &self.0);
+        l.worktrees.retain(|w| w.0 != self.0);
     }
 }
 
@@ -379,13 +515,17 @@ impl TempDir {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
+        let mut l = live();
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        l.dirs.push(dir.clone());
         Ok(TempDir(dir))
     }
 }
 
 impl Drop for TempDir {
     fn drop(&mut self) {
+        let mut l = live();
         let _ = std::fs::remove_dir_all(&self.0);
+        l.dirs.retain(|d| *d != self.0);
     }
 }
