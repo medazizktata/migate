@@ -1,6 +1,10 @@
 # typos: spell-check code and docs (run by scripts/check.sh and CI).
 [default.extend-words]
 migate = "migate"   # the project's name, not a misspelling of "migrate"
+# Deliberate misspellings in crates/migate-core/src/schema.rs tests, proving a reader's typo is refused.
+defualt = "defualt"
+predicat = "predicat"
+tabel = "tabel"
 
 [files]
 extend-exclude = [

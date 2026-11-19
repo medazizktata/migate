@@ -7,6 +7,9 @@ set -euo pipefail
 allowed=(
   # SHA-256 for the ledger (sha2 0.10 and its tree; libc comes via cpufeatures on some targets)
   sha2 digest block-buffer crypto-common generic-array typenum cpufeatures cfg-if libc
+  # Serialization of the schema model, so snapshots cross the JSON boundary to plug-ins (TASK-13). serde_derive and its
+  # tree are compile-time code generation, not runtime I/O.
+  serde serde_core serde_derive proc-macro2 quote syn unicode-ident
 )
 
 cargo=${CARGO:-cargo}

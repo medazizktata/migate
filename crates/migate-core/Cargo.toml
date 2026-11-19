@@ -11,6 +11,13 @@ publish.workspace = true
 # scripts/check-core-deps.sh enforces it against an allowlist; add a crate here only after adding it there, on purpose.
 [dependencies]
 sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# Tests only: generate the published JSON Schema and validate fixtures against it. Not in the core's dependency tree.
+schemars = "1"
+serde_json = "1"
+jsonschema = { version = "0.61", default-features = false }
 
 [lints]
 workspace = true

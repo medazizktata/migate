@@ -214,6 +214,11 @@ payload hash), then a field comparison per kind.
 | enum | values, scope `namespace\|column` | Prisma turns a MySQL ENUM into `{table}_{column}` (V(sub), `mysql.rs:616`) |
 | sequence | type, owned-by | |
 
+**(revised) Implemented** in `crates/migate-core/src/schema.rs` (TASK-13): snapshot format 1, published as
+`schema/snapshot.schema.json` (generated from the types by a test; `MIGATE_BLESS=1` regenerates it). Snapshots are
+validated on construction and on load: unique keys, parents where required, kinds within the declared capabilities, and
+unknown fields refused (a reader's typo must not be silently dropped).
+
 **Capabilities.** Each reader declares the kinds it sees. A blind kind is reported as "not checked", never as "none"
 (rule MG801).
 

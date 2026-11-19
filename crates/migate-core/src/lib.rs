@@ -8,5 +8,6 @@ pub mod hash;
 pub mod ledger;
 pub mod order;
 pub mod rules;
+pub mod schema;
 
 pub use finding::{Finding, Severity};

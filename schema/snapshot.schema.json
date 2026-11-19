@@ -1,0 +1,565 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SnapshotFile",
+  "description": "The JSON form of a snapshot, as published in `schema/snapshot.schema.json`.",
+  "type": "object",
+  "properties": {
+    "capabilities": {
+      "description": "The kinds this reader can see. Every object's kind must be one of them.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Kind"
+      },
+      "uniqueItems": true
+    },
+    "engine": {
+      "description": "e.g. `sqlite`, `postgres`.",
+      "type": "string"
+    },
+    "engine_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "format": {
+      "description": "Always 1 for this version of the format.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Object"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "engine",
+    "capabilities",
+    "objects"
+  ],
+  "$defs": {
+    "DataType": {
+      "description": "A column's type: the engine's own text, plus a family and parameters where they apply.",
+      "type": "object",
+      "properties": {
+        "family": {
+          "$ref": "#/$defs/TypeFamily"
+        },
+        "length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "precision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "raw": {
+          "description": "The engine's own rendering, e.g. `character varying(200)` or `INTEGER`.",
+          "type": "string"
+        },
+        "scale": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "raw",
+        "family"
+      ]
+    },
+    "Generated": {
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string"
+        },
+        "stored": {
+          "description": "Stored (computed on write) rather than virtual (computed on read).",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "expression",
+        "stored"
+      ]
+    },
+    "IndexPart": {
+      "description": "One part of an index key.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "descending": {
+              "type": "boolean",
+              "default": false
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "column"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "descending": {
+              "type": "boolean",
+              "default": false
+            },
+            "sql": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "expression"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "sql"
+          ]
+        }
+      ]
+    },
+    "Kind": {
+      "description": "The kinds of schema object.",
+      "type": "string",
+      "enum": [
+        "namespace",
+        "table",
+        "column",
+        "primary_key",
+        "unique",
+        "check",
+        "foreign_key",
+        "index",
+        "view",
+        "trigger",
+        "routine",
+        "enum",
+        "sequence"
+      ]
+    },
+    "Object": {
+      "description": "One schema object. `namespace` is the schema (Postgres, SQL Server), the database (MySQL) or `main` (SQLite).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "parent": {
+          "description": "The table a column, key, constraint, index or trigger belongs to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "namespace"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "table"
+            },
+            "strict": {
+              "description": "SQLite `STRICT`.",
+              "type": "boolean",
+              "default": false
+            },
+            "without_rowid": {
+              "description": "SQLite `WITHOUT ROWID`.",
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "data_type": {
+              "$ref": "#/$defs/DataType"
+            },
+            "default": {
+              "description": "The default expression as the engine renders it; absent when there is none.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "generated": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Generated"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "identity": {
+              "description": "An identity or autoincrement column.",
+              "type": "boolean",
+              "default": false
+            },
+            "kind": {
+              "type": "string",
+              "const": "column"
+            },
+            "nullable": {
+              "type": "boolean"
+            },
+            "ordinal": {
+              "description": "Position in the table, from 0.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "ordinal",
+            "data_type",
+            "nullable"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "primary_key"
+            }
+          },
+          "required": [
+            "kind",
+            "columns"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "unique"
+            }
+          },
+          "required": [
+            "kind",
+            "columns"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "check"
+            },
+            "validated": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "kind",
+            "expression"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "deferrable": {
+              "type": "boolean",
+              "default": false
+            },
+            "kind": {
+              "type": "string",
+              "const": "foreign_key"
+            },
+            "on_delete": {
+              "description": "e.g. `CASCADE`, `RESTRICT`, `NO ACTION`.",
+              "type": "string"
+            },
+            "on_update": {
+              "type": "string"
+            },
+            "ref_columns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "ref_namespace": {
+              "type": "string"
+            },
+            "ref_table": {
+              "type": "string"
+            },
+            "validated": {
+              "description": "False for a constraint added `NOT VALID` (Postgres) that has not been validated yet.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "kind",
+            "columns",
+            "ref_namespace",
+            "ref_table",
+            "ref_columns",
+            "on_delete",
+            "on_update"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "index"
+            },
+            "method": {
+              "description": "The access method where the engine has several (e.g. `btree`, `gin`).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/IndexPart"
+              }
+            },
+            "predicate": {
+              "description": "A partial index's `WHERE` clause.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "unique": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "unique",
+            "parts"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "definition": {
+              "description": "The definition as the engine renders it.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "view"
+            },
+            "materialized": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "kind",
+            "definition"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "definition": {
+              "type": "string"
+            },
+            "events": {
+              "description": "e.g. `INSERT`, `UPDATE`, `DELETE`.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "trigger"
+            },
+            "timing": {
+              "description": "e.g. `BEFORE`, `AFTER`, `INSTEAD OF`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "timing",
+            "events",
+            "definition"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "arguments": {
+              "description": "The identity arguments, e.g. `integer, text`.",
+              "type": "string"
+            },
+            "definition_sha256": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "routine"
+            }
+          },
+          "required": [
+            "kind",
+            "arguments",
+            "definition_sha256"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "enum"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "values"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data_type": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "sequence"
+            },
+            "owned_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "data_type"
+          ]
+        }
+      ],
+      "required": [
+        "namespace",
+        "name"
+      ]
+    },
+    "TypeFamily": {
+      "description": "A normalised type family, for rules that compare types across a change (narrowing, for example).",
+      "type": "string",
+      "enum": [
+        "integer",
+        "decimal",
+        "float",
+        "text",
+        "binary",
+        "boolean",
+        "date",
+        "time",
+        "timestamp",
+        "uuid",
+        "json",
+        "array",
+        "enum",
+        "other"
+      ]
+    }
+  }
+}
