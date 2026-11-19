@@ -32,6 +32,11 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
 - Rust; Apache-2.0; pure open source, no revenue.
 
 ## Development
+- Rust is pinned in `rust-toolchain.toml` (1.93.1, what rustup already has on the development Mac). `just doctor` shows
+  which cargo, rustc, clippy and rustfmt your shell really uses; they should all match the pin (see "Known local issue").
+- `just` lists the usual commands: `just check`, `just test`, `just lint`, `just fmt`. Run `just hooks` once per clone to
+  enable the pre-commit hook (format, clippy, tests).
+- The code follows `docs/architecture-decisions/0001-hexagonal-core.md`: a pure core, ports added only when needed.
 - `bash scripts/check.sh` runs every check, the same way CI does: rustfmt, clippy (lints and type checks, `-D warnings`),
   rustdoc, tests, the core dependency rule, cargo-deny (advisories, licences, sources), shellcheck, actionlint and typos.
   A missing tool fails the run; `MIGATE_ALLOW_MISSING=1` runs what is installed.
@@ -39,6 +44,11 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
   commit SHAs.
 - Every rule migate enforces gets a case it must fail and one it must pass, and is shown failing by deliberate sabotage
   before it is trusted.
+
+**Known local issue (development Mac, 2026-11-19):** `/opt/homebrew/bin` comes before rustup's `~/.cargo/bin` on the
+PATH, so cargo resolves to the pinned 1.93.1 while rustc, clippy and rustfmt resolve to Homebrew's 1.99 (`just doctor`
+shows it). Builds work, but local lints can differ from CI. Fix by putting `~/.cargo/bin` before `/opt/homebrew/bin`, or
+by using one Rust install.
 
 ## Next
 - Both de-risking spikes are done (`docs/research/spike-7.md`, `docs/research/spike-31.md`): real migrators run in the

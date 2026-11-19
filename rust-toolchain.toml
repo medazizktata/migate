@@ -1,0 +1,5 @@
+[toolchain]
+# The version rustup already has on the development Mac; CI installs the same. Bump on purpose (new lints come with it).
+# The minimum supported version (rust-version = 1.85) is checked separately in CI.
+channel = "1.93.1"
+components = ["rustfmt", "clippy"]

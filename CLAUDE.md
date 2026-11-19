@@ -12,5 +12,7 @@ the SQLite engine and may be an early plug-in, never the product's identity; Pos
   text-based breaking-change check misses triggers, constraints, views and runtime SQL, and a schema diff alone misses
   breaking additions (`docs/research/blind-review.md`).
 - Work directly on `main`; no feature branches while the project is early.
+- Code structure follows `docs/architecture-decisions/0001-hexagonal-core.md`: no I/O in `migate-core`, ports only when a
+  task needs them, migration tools as TOML data. Run `just check` (or `bash scripts/check.sh`) before reporting work done.
 - Every rule the tool enforces gets a known-bad fixture it fails on and a known-good one it passes (calibrate both ways).
 - Do not push or publish anything without the owner's say-so.
