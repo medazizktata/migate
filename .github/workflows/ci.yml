@@ -36,7 +36,7 @@ jobs:
       - run: bash scripts/check.sh
 
   msrv:
-    name: minimum supported Rust (rust-version = 1.85)
+    name: minimum supported Rust (rust-version = 1.89)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,7 +44,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
-          toolchain: "1.85"
+          toolchain: "1.89"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      # `+1.85` beats rust-toolchain.toml; without it this job would silently check with the pinned 1.93.1.
-      - run: cargo +1.85 check --workspace --all-targets --locked
+      # `+1.89` beats rust-toolchain.toml; without it this job would silently check with the pinned 1.93.1.
+      - run: cargo +1.89 check --workspace --all-targets --locked

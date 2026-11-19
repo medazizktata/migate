@@ -6,7 +6,8 @@ yanked = "deny"
 
 [licenses]
 # Licences compatible with shipping migate under Apache-2.0. Add one only on purpose.
-allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+# Zlib: permissive and OSI-approved (foldhash, via rusqlite's hash map), added deliberately.
+allow = ["Apache-2.0", "MIT", "Unicode-3.0", "Zlib"]
 confidence-threshold = 0.9
 
 [bans]

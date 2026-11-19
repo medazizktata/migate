@@ -5,6 +5,7 @@ migate = "migate"   # the project's name, not a misspelling of "migrate"
 defualt = "defualt"
 predicat = "predicat"
 tabel = "tabel"
+doub = "doub"   # SQLite's type-affinity rule: a declared type containing "DOUB" is REAL
 
 [files]
 extend-exclude = [
