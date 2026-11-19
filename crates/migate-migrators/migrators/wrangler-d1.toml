@@ -1,0 +1,17 @@
+id = "wrangler-d1"
+name = "Wrangler D1 migrations"
+# Files: migrations/NNNN_<name>.sql; d1_migrations.name stores the whole file name.
+path_pattern = '(?:^|/)migrations/(?P<id>(?P<version>\d+)_[^/]+\.sql)$'
+order = "numeric"
+# Wrangler applies any file not in d1_migrations, in any order (workers-sdk src/d1/migrations/helpers.ts).
+out_of_order = "warn"
+checksum = "none"
+
+[history]
+kind = "full"
+query = "SELECT name FROM d1_migrations"
+
+[migrate]
+# {database} is the binding or database name from the project's wrangler configuration.
+command = "npx wrangler d1 migrations apply {database} --local"
+env = {}

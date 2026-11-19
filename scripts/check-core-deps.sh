@@ -5,7 +5,8 @@
 set -euo pipefail
 
 allowed=(
-  # (none yet)
+  # SHA-256 for the ledger (sha2 0.10 and its tree; libc comes via cpufeatures on some targets)
+  sha2 digest block-buffer crypto-common generic-array typenum cpufeatures cfg-if libc
 )
 
 cargo=${CARGO:-cargo}

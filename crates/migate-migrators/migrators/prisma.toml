@@ -1,0 +1,17 @@
+id = "prisma"
+name = "Prisma Migrate"
+# Folders: prisma/migrations/YYYYMMDDHHMMSS_<name>/migration.sql; the history table stores the folder name.
+path_pattern = '(?:^|/)migrations/(?P<id>(?P<version>\d{14})_[^/]+)/migration\.sql$'
+order = "timestamp-prefix"
+# `migrate deploy` applies unapplied migrations; whether it refuses an older one is unverified, so warn.
+out_of_order = "warn"
+# Prisma stores a checksum but `migrate deploy` only warns on an edit (docs/research/validation.md).
+checksum = "none"
+
+[history]
+kind = "full"
+query = "SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL"
+
+[migrate]
+command = "npx prisma migrate deploy"
+env = {}

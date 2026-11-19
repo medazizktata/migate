@@ -1,0 +1,18 @@
+[package]
+name = "migate-migrators"
+description = "migate's migrator definitions (data files) and the interpreter that reads a project's migrations with them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+migate-core = { path = "../migate-core" }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+
+[lints]
+workspace = true

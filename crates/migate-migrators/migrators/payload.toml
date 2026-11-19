@@ -1,0 +1,18 @@
+id = "payload"
+name = "Payload"
+# Files: <migrations dir>/YYYYMMDD_HHMMSS_<name>.ts (index.ts is not a migration). The history table stores the stem.
+path_pattern = '(?:^|/)(?P<id>(?P<version>\d{8}_\d{6})_[^/]+?)\.ts$'
+order = "timestamp-prefix"
+# Payload runs any file not in payload_migrations, in any order (docs/research/first-pass.md).
+out_of_order = "warn"
+checksum = "none"
+
+[history]
+kind = "full"
+# batch -1 marks a dev push, not a migration (packages/payload/src/database/migrations/migrationsCollection.ts).
+query = "SELECT name FROM payload_migrations WHERE batch <> -1"
+
+[migrate]
+command = "npx payload migrate"
+# Stock `payload migrate` refuses to start without a secret (docs/research/spike-7.md); any value works in a sandbox.
+env = { PAYLOAD_SECRET = "migate-sandbox-secret" }

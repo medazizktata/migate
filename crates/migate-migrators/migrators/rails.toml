@@ -1,0 +1,17 @@
+id = "rails"
+name = "Rails (Active Record)"
+# Files: db/migrate/YYYYMMDDHHMMSS_<name>.rb; schema_migrations stores the version only.
+path_pattern = '(?:^|/)db/migrate/(?P<id>(?P<version>\d{14})_[^/]+)\.rb$'
+order = "timestamp-prefix"
+# Pending means "not in schema_migrations", so an older migration still runs (activerecord migration.rb).
+out_of_order = "warn"
+checksum = "none"
+
+[history]
+kind = "full"
+query = "SELECT version FROM schema_migrations"
+
+[migrate]
+command = "bin/rails db:migrate"
+# A CI checkout has no master.key; production mode keeps the tree clean (development rewrites db/schema.rb).
+env = { RAILS_ENV = "production", SECRET_KEY_BASE_DUMMY = "1" }

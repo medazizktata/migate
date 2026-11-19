@@ -1,0 +1,18 @@
+id = "django"
+name = "Django"
+# Files: <app>/migrations/NNNN_<name>.py; django_migrations stores (app, name). Order is the dependency graph.
+path_pattern = '(?:^|/)(?P<group>[^/]+)/migrations/(?P<id>(?P<version>\d{4}_[^/]+))\.py$'
+order = "graph"
+graph = "django"
+out_of_order = "block"
+checksum = "none"
+
+[history]
+kind = "full"
+# shortcut: `||` works on SQLite and Postgres, not MySQL (CONCAT); add a per-engine query when MySQL lands.
+query = "SELECT app || '/' || name FROM django_migrations"
+
+[migrate]
+command = "python manage.py migrate"
+# The common production settings read the secret from the environment and refuse to start without it (spike-7).
+env = { DJANGO_SECRET_KEY = "migate-sandbox-secret" }

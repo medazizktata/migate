@@ -10,6 +10,7 @@ publish.workspace = true
 # The core stays pure: no database driver, async runtime or git library may appear in this crate's dependency tree.
 # scripts/check-core-deps.sh enforces it against an allowlist; add a crate here only after adding it there, on purpose.
 [dependencies]
+sha2 = "0.10"
 
 [lints]
 workspace = true
