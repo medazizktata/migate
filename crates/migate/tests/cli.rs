@@ -1157,3 +1157,36 @@ fn a_database_the_project_keeps_inside_its_checkout_is_shared_by_base_and_head()
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("must be a folder inside the project"), "{err}");
 }
+
+#[test]
+fn a_project_whose_runner_refuses_late_migrations_can_say_so() {
+    let r = Repo::new();
+    r.write(
+        "migate.toml",
+        "migrator = \"wrangler-d1\"\nbase = \"main\"\nout_of_order = \"block\"\n",
+    );
+    r.write("migrations/0001_init.sql", "CREATE TABLE a (id INTEGER);");
+    r.write("migrations/0003_c.sql", "CREATE TABLE c (id INTEGER);");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write("migrations/0002_b.sql", "CREATE TABLE b (id INTEGER);");
+    r.commit("late branch");
+    let out = r.migate(&["check"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert!(
+        text.contains("error   MG004") && text.contains("does not allow out-of-order"),
+        "{text}"
+    );
+    r.write(
+        "migate.toml",
+        "migrator = \"wrangler-d1\"\nbase = \"main\"\nout_of_order = \"maybe\"\n",
+    );
+    let out = r.migate(&["check"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("out_of_order"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

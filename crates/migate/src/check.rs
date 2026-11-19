@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 use migate_core::ledger::{self, Ledger};
+use migate_core::order::OutOfOrder;
 use migate_core::{Finding, Severity, order};
 use migate_migrators::Migrator;
 
@@ -71,7 +72,22 @@ fn settings(c: &Common, base_flag: Option<&String>) -> Result<Settings, String> 
         .or(file.migrator)
         .ok_or("no migrator: pass --migrator or set `migrator` in migate.toml")?;
     Ok(Settings {
-        migrator: migrator(&id)?,
+        migrator: {
+            let mut m = migrator(&id)?;
+            if let Some(level) = &file.out_of_order {
+                m.set_out_of_order(match level.as_str() {
+                    "block" => OutOfOrder::Block,
+                    "warn" => OutOfOrder::Warn,
+                    "allow" => OutOfOrder::Allow,
+                    other => {
+                        return Err(format!(
+                            "out_of_order must be block, warn or allow, not {other:?}"
+                        ));
+                    }
+                });
+            }
+            m
+        },
         root: c.root.clone(),
         ledger: c
             .ledger

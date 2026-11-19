@@ -4,6 +4,7 @@
 //! migrator = "payload"
 //! ledger = "db/migate-ledger.json"            # relative to the project directory
 //! base = "origin/main"
+//! out_of_order = "block"                    # optional: the project's runner refuses migrations older than the last
 //!
 //! # Optional: migrate a throwaway SQLite database at base and at head, diff the schemas, run the base version's tests.
 //! [sandbox]
@@ -28,6 +29,8 @@ pub struct Config {
     pub migrator: Option<String>,
     pub ledger: Option<String>,
     pub base: Option<String>,
+    /// Overrides the migrator's out-of-order policy (block, warn or allow) when the project's own runner differs.
+    pub out_of_order: Option<String>,
     pub sandbox: Option<Sandbox>,
 }
 

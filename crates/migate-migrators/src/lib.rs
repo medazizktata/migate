@@ -195,6 +195,12 @@ impl Migrator {
         self.policy
     }
 
+    /// Replace what the migrator does with a migration older than the last applied one, for a project whose own
+    /// runner differs from the stock tool (one that refuses out-of-order migrations, say).
+    pub fn set_out_of_order(&mut self, out_of_order: OutOfOrder) {
+        self.policy.out_of_order = out_of_order;
+    }
+
     pub fn checksum(&self) -> MigratorChecksum {
         self.checksum
     }
