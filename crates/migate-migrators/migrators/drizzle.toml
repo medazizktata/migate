@@ -17,5 +17,6 @@ kind = "full"
 query = "SELECT created_at FROM __drizzle_migrations ORDER BY created_at"
 
 [migrate]
-command = "npx drizzle-kit migrate"
+# --no: never download a package the project does not have.
+command = "npx --no drizzle-kit migrate"
 env = {}

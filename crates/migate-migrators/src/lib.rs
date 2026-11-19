@@ -79,9 +79,17 @@ pub struct History {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Migrate {
+    /// Run in the checkout. `{db}` is the throwaway database's path, `{dir}` its folder, `{database}` the database's
+    /// name in the project's own configuration (`[sandbox] database_name`).
     pub command: String,
+    /// Variables for every command the run starts (migrate, setup, seed, tests).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Variables for the migrate command only, such as a run mode the tests must not inherit.
+    #[serde(default)]
+    pub migrate_env: BTreeMap<String, String>,
+    /// Where the tool writes the database when it picks the file name itself (a `*` in the file name matches).
+    pub database: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -461,6 +469,33 @@ mod tests {
             rules(&check(m.policy(), &dup, &[])),
             vec![("MG006", Severity::Warning)]
         );
+    }
+
+    #[test]
+    fn rails_run_mode_is_for_the_migrate_command_only() {
+        let m = get("rails").unwrap().unwrap();
+        assert_eq!(
+            m.migrate.migrate_env.get("RAILS_ENV").map(String::as_str),
+            Some("production")
+        );
+        assert!(
+            !m.migrate.env.contains_key("RAILS_ENV"),
+            "the tests would run in production mode"
+        );
+    }
+
+    #[test]
+    fn bundled_node_commands_never_download_packages() {
+        for m in bundled().unwrap() {
+            if m.migrate.command.contains("npx ") {
+                assert!(
+                    m.migrate.command.contains("npx --no "),
+                    "{}: {}",
+                    m.id,
+                    m.migrate.command
+                );
+            }
+        }
     }
 
     #[test]

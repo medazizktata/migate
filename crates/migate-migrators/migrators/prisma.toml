@@ -15,5 +15,5 @@ kind = "full"
 query = "SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL"
 
 [migrate]
-command = "npx prisma migrate deploy"
+command = "npx --no prisma migrate deploy"
 env = {}

@@ -8,6 +8,7 @@
 //! # Optional: migrate a throwaway SQLite database at base and at head, diff the schemas, run the base version's tests.
 //! [sandbox]
 //! env = { DATABASE_URL = "sqlite:///{db}" }   # how the project is told where the database is; {db} is its path
+//! database_name = "app"                        # Wrangler D1: the database's name in wrangler.toml
 //! setup = "npm ci"                             # run in each checkout first (a fresh checkout has no dependencies)
 //! seed = "npm run seed"                        # optional: rows for the data-loss check
 //! test = "npm test"                            # the base version's tests, run against the migrated database
@@ -45,6 +46,9 @@ pub struct Sandbox {
     pub database: Option<String>,
     /// Replaces the migrator's migrate command.
     pub migrate: Option<String>,
+    /// The database's name in the project's own configuration, for migrate commands that need one (`{database}`;
+    /// Wrangler D1's database name or binding).
+    pub database_name: Option<String>,
     pub setup: Option<String>,
     /// Run in the base checkout after the base migrations, to put rows in the database; with the rows the base tests
     /// leave behind, they show data a migration loses.

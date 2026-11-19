@@ -16,6 +16,6 @@ kind = "full"
 query = "SELECT name FROM payload_migrations WHERE batch <> -1"
 
 [migrate]
-command = "npx payload migrate"
+command = "npx --no payload migrate"
 # Stock `payload migrate` refuses to start without a secret (docs/research/spike-7.md); any value works in a sandbox.
 env = { PAYLOAD_SECRET = "migate-sandbox-secret" }

@@ -24,15 +24,31 @@ use migate_migrators::Migrator;
 use crate::config::Sandbox;
 use crate::project;
 
-/// Variables passed from migate's own environment without being asked for: the toolchain's, never a connection.
-const PASSED: [&str; 10] = [
-    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR", "TEMP", "TMP", "LANG",
+/// Variables passed from migate's own environment without being asked for: the toolchain's, never a connection or a
+/// credential (`BUNDLE_<host>` holds gem-server passwords, so Bundler's settings are named one by one).
+const PASSED: [&str; 18] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TERM",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "GEM_HOME",
+    "GEM_PATH",
+    "BUNDLE_PATH",
+    "BUNDLE_GEMFILE",
+    "BUNDLE_APP_CONFIG",
+    "BUNDLE_WITHOUT",
+    "BUNDLE_DEPLOYMENT",
+    "BUNDLE_FROZEN",
 ];
-const PASSED_PREFIXES: [&str; 12] = [
+const PASSED_PREFIXES: [&str; 9] = [
     "LC_",
     "XDG_",
-    "GEM_",
-    "BUNDLE_",
     "RBENV_",
     "PYENV_",
     "VIRTUAL_ENV",
@@ -40,7 +56,6 @@ const PASSED_PREFIXES: [&str; 12] = [
     "NVM_",
     "VOLTA_",
     "COREPACK_",
-    "CARGO_",
 ];
 
 pub fn run(
@@ -55,22 +70,22 @@ pub fn run(
     let dir = tmp.0.join("db");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let db = dir.join("sandbox.db");
+    let name = cfg.database_name.clone().unwrap_or_default();
     let vars = |s: &str| {
         s.replace("{db}", &db.to_string_lossy())
             .replace("{dir}", &dir.to_string_lossy())
+            .replace("{database}", &name)
     };
 
-    let migrate = vars(cfg.migrate.as_deref().unwrap_or(&migrator.migrate.command));
-    if migrate.contains("{database}") {
+    let command = cfg.migrate.as_deref().unwrap_or(&migrator.migrate.command);
+    if command.contains("{database}") && cfg.database_name.is_none() {
         return Err(format!(
-            "the {} migrate command needs the database name: set `migrate` under [sandbox] in migate.toml \
-             (for example `{}`)",
-            migrator.id,
-            migrate
-                .replace("{database}", "DB")
-                .replace("--local", "--local --persist-to {dir}")
+            "the {} migrate command needs the database's name: set `database_name` under [sandbox] in migate.toml \
+             (the name or binding in the project's own configuration)",
+            migrator.id
         ));
     }
+    let migrate = vars(command);
     let mut env: BTreeMap<String, String> = std::env::vars()
         .filter(|(k, _)| {
             PASSED.contains(&k.as_str())
@@ -82,6 +97,16 @@ pub fn run(
         migrator
             .migrate
             .env
+            .iter()
+            .chain(&cfg.env)
+            .map(|(k, v)| (k.clone(), vars(v))),
+    );
+    // The migrate command also gets the migrator's run mode; the config's own values still win.
+    let mut migrate_env = env.clone();
+    migrate_env.extend(
+        migrator
+            .migrate
+            .migrate_env
             .iter()
             .chain(&cfg.env)
             .map(|(k, v)| (k.clone(), vars(v))),
@@ -127,18 +152,26 @@ pub fn run(
     }
 
     eprintln!("migate: migrating a throwaway database to {base}");
-    let out = sh(&migrate, &base_dir, &env)?;
+    let out = sh(&migrate, &base_dir, &migrate_env)?;
     if !out.status.success() {
         return Err(format!(
             "the base migrations fail on an empty database, so nothing was checked:\n{}",
             tail(&out)
         ));
     }
-    let path = locate(cfg.database.as_deref().map(vars), &db)?;
+    // The migrator's location goes with its own command; a project that replaces the command says where it writes.
+    let tool_location = migrator
+        .migrate
+        .database
+        .as_deref()
+        .filter(|_| cfg.migrate.is_none());
+    let pattern = cfg.database.as_deref().or(tool_location).map(vars);
+    let path = locate(pattern, &db, &migrator.history.query)?;
     let not_migrated = |why: String| {
         format!(
-            "MG804 sandbox-not-migrated: {why}. The migrate command probably wrote somewhere else: check that \
-             [sandbox] sets the variable the project reads its database from"
+            "MG804 sandbox-not-migrated: {why}. The migrate command probably wrote somewhere else: check that it is \
+             told where the database is ({{db}} in a variable under [sandbox] env, or {{dir}} in a flag such as \
+             --persist-to), and that [sandbox] database names the file it writes"
         )
     };
     let path = path.ok_or_else(|| not_migrated(format!("no database at {}", db.display())))?;
@@ -178,7 +211,7 @@ pub fn run(
     let rows_before = migate_engine_sqlite::row_counts(&path).map_err(sql_err)?;
 
     eprintln!("migate: migrating it to HEAD");
-    let out = sh(&migrate, &head_dir, &env)?;
+    let out = sh(&migrate, &head_dir, &migrate_env)?;
     let after = migate_engine_sqlite::snapshot(&path).map_err(|e| e.to_string())?;
     let mut findings = Vec::new();
     let migrated = out.status.success();
@@ -262,7 +295,9 @@ pub fn run(
 }
 
 /// The database file: `{db}` unless `[sandbox] database` names another place; `None` if nothing is there.
-fn locate(database: Option<String>, db: &Path) -> Result<Option<PathBuf>, String> {
+/// The database file: `{db}`, or the file `database` names (one `*` in the file name may match several; the one holding
+/// the migration history is the database).
+fn locate(database: Option<String>, db: &Path, history: &str) -> Result<Option<PathBuf>, String> {
     let Some(pattern) = database else {
         return Ok(db.is_file().then(|| db.to_path_buf()));
     };
@@ -292,11 +327,14 @@ fn locate(database: Option<String>, db: &Path) -> Result<Option<PathBuf>, String
                 && n.ends_with(post)
         })
         .collect();
+    if hits.len() > 1 {
+        hits.retain(|p| migate_engine_sqlite::count_rows(p, history).is_ok());
+    }
     match hits.len() {
         0 => Ok(None),
         1 => Ok(hits.pop()),
         _ => Err(format!(
-            "[sandbox] database `{}` matches {} files; it must match one",
+            "the database pattern `{}` matches {} files holding a migration history; it must match one",
             pattern.display(),
             hits.len()
         )),

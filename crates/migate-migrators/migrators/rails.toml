@@ -13,5 +13,7 @@ query = "SELECT version FROM schema_migrations"
 
 [migrate]
 command = "bin/rails db:migrate"
-# A CI checkout has no master.key; production mode keeps the tree clean (development rewrites db/schema.rb).
-env = { RAILS_ENV = "production", SECRET_KEY_BASE_DUMMY = "1" }
+# A CI checkout has no master.key; production mode keeps the tree clean (development rewrites db/schema.rb). The tests
+# need their own mode, so RAILS_ENV is for the migrate command only.
+env = { SECRET_KEY_BASE_DUMMY = "1" }
+migrate_env = { RAILS_ENV = "production" }

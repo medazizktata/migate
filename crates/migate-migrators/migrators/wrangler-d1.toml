@@ -14,6 +14,9 @@ kind = "full"
 query = "SELECT name FROM d1_migrations"
 
 [migrate]
-# {database} is the binding or database name from the project's wrangler configuration.
-command = "npx wrangler d1 migrations apply {database} --local"
+# {database} is the database's name or binding in the project's wrangler configuration ([sandbox] database_name).
+# --persist-to puts local state in the run's folder, where Wrangler names the file after a hash of the database id;
+# a metadata.sqlite sits next to it, so the file holding d1_migrations is the one read.
+command = "npx --no wrangler d1 migrations apply {database} --local --persist-to {dir}"
 env = {}
+database = "{dir}/v3/d1/miniflare-D1DatabaseObject/*.sqlite"

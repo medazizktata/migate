@@ -6,8 +6,8 @@ migration that would break the running app is stopped before it ships. It also s
 production ran it, from running out of order or being silently skipped, and from disagreeing with production's own
 history.
 
-Status: early, not released. Works today on SQLite projects; Cloudflare D1's local mode runs but needs the database
-file named by hand in `[sandbox] database`. `docs/product.md` marks what is built and what is planned. (Earlier documents call it `migration-guard`, its working name.)
+Status: early, not released. Works today on SQLite projects, Cloudflare D1's local mode included. `docs/product.md`
+marks what is built and what is planned. (Earlier documents call it `migration-guard`, its working name.)
 Licence: Apache-2.0 (`LICENSE`). Start here:
 
 - `docs/product.md`: the product: the problem, who it is for, what it does, what it is not, and where it stands.
@@ -55,6 +55,18 @@ ALTER TABLE users DROP COLUMN legacy;
 
 The finding stays in the report as a note. A marker with no reason, or one that matches nothing, is an error (MG901),
 and nothing accepts a failing old-version test.
+
+For Cloudflare D1, migate runs `wrangler d1 migrations apply --local` into its own folder and finds the database
+there; it only needs the database's name from your wrangler configuration:
+
+```toml
+migrator = "wrangler-d1"
+[sandbox]
+database_name = "app"
+test = "npm test"
+```
+
+Migrate commands that use `npx` never download a package the project does not have.
 
 Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--format sarif` for machines.
 

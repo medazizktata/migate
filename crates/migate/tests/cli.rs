@@ -484,8 +484,9 @@ fn record_all_adopts_every_migration_and_conflicts_with_ids() {
 // standard sqlite3 module, present on CI runners): it applies migrations/*.sql not yet in d1_migrations, statement by
 // statement with no transaction around a file, like D1.
 const APPLY: &str = r#"import os, pathlib, sqlite3, sys
-if "DATABASE_URL" in os.environ:
-    sys.exit("DATABASE_URL leaked into the sandbox: " + os.environ["DATABASE_URL"])
+for leak in ("DATABASE_URL", "BUNDLE_GEMS__EXAMPLE__COM"):
+    if leak in os.environ:
+        sys.exit(leak + " leaked into the sandbox: " + os.environ[leak])
 con = sqlite3.connect(os.environ.get("D1_PATH", "local.db"), isolation_level=None)
 con.execute("PRAGMA foreign_keys = ON")  # D1 enforces foreign keys
 con.execute("CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY, name TEXT UNIQUE)")
@@ -579,7 +580,10 @@ fn sandbox_passes_a_safe_addition_and_never_passes_a_connection_url_through() {
     let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
     let (code, out, err) = sandbox_check(
         &r,
-        &[("DATABASE_URL", "postgres://production.example.invalid/db")],
+        &[
+            ("DATABASE_URL", "postgres://production.example.invalid/db"),
+            ("BUNDLE_GEMS__EXAMPLE__COM", "user:secret"),
+        ],
     );
     assert_eq!(code, 0, "{out}{err}");
     assert!(out.contains("MG210") && !out.contains("MG810"), "{out}");
@@ -972,4 +976,16 @@ fn a_run_cleans_up_what_a_killed_run_left_behind() {
     assert_eq!(code, 0, "{out}{err}");
     assert!(!left.exists(), "the dead run's folder is still there");
     assert_eq!(worktrees(&r), 1);
+}
+
+#[test]
+fn sandbox_finds_the_database_among_files_the_tool_writes() {
+    // Like Wrangler's --persist-to folder: the database under a name migate cannot know, and a metadata.sqlite beside it.
+    let config = SANDBOX_TOML
+        .replace("migrate = \"python3 apply.py\"", "migrate = \"python3 apply.py && python3 -c 'import os, sqlite3; sqlite3.connect(os.environ[\\\"META\\\"]).execute(\\\"CREATE TABLE IF NOT EXISTS mf (k)\\\")'\"\ndatabase = \"{dir}/*.sqlite\"")
+        .replace("env = { D1_PATH = \"{db}\" }", "env = { D1_PATH = \"{dir}/3f2a9c.sqlite\", META = \"{dir}/metadata.sqlite\" }");
+    let r = sandbox_repo(&config, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("MG210"), "{out}");
 }
