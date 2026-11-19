@@ -150,7 +150,7 @@ its users are not on Node, the user's migrate command runs as a separate process
 
 The repository folder was renamed from `migration-guard` to `migate` the same day.
 
-**Ideas from the discussion, not yet in `architecture.md`:**
+**Ideas from the discussion, now folded into `architecture.md` (section 0 lists the revisions):**
 - **Read-only production checks at release:** for each risky change, one count through the read-only connection the
   tool already uses (rows where a new NOT NULL column is NULL, duplicates for a new UNIQUE, orphans for a new foreign
   key, the longest value for a narrowed type, the catalog's row estimate for lock risk). Counts only; no data leaves

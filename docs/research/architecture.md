@@ -1,8 +1,9 @@
-# Recommended architecture
+# migate architecture
 
-Date: 2026-11-19. Scope: any migrator, any database engine, any host. D1 is one host of the SQLite engine, the way RDS
-is one host of PostgreSQL. This document does not decide the implementation language (`stack.md` does); section 10 says
-where the design constrains it.
+First written 2026-11-19; revised the same day after `validation.md` and `blind-review.md` (section 0 lists what
+changed). Scope: any migrator, any database engine, any host. D1 is one host of the SQLite engine, the way RDS is one
+host of PostgreSQL. Implementation language: Rust (`stack.md`, decided in `README.md` section 6); the type sketches below
+use TypeScript notation only for readability.
 
 **How this was made.** A research agent read primary sources (Atlas, wrangler, Miniflare, Payload, drizzle-kit, Flyway,
 Prisma source; Cloudflare docs) and ran local probes, now in `bench/arch/`. The main session re-ran the probes (see the
@@ -11,6 +12,22 @@ end).
 **Labels.** **V** read the primary source or ran it. **V(sub)** a research sub-agent read the primary source and its
 file:line is relayed; the ones re-checked are marked "re-checked". **R** relayed. **U** unknown. Line numbers are for
 the commit named, fetched 2026-11-19.
+
+## 0. Revisions (2026-11-19, after the validation and the blind review)
+
+| Change | Why | Where |
+|---|---|---|
+| **The primary check is a mixed-version test:** every live version's tests (or its models and queries) run against the database migrated to the PR head. The schema diff becomes the fast first pass, the fallback where a team has no tests, and the source of the PR comment. | A schema diff misses breaking *additions* (GitLab #5171, severity 1: a schema change made queries from running Rails processes invalid); GitHub's two August 2025 outages were intended drops of a column the running ORM still used. | §1, §2, §3, §6 |
+| **Reference rules per ORM**, against **all live versions**, not "the previous version". Rails: a column is in use unless it is in `ignored_columns`; Prisma: the model definition is the reference. | Rails caches every column at boot; Vercel keeps old deployments serving 12-24 h. | §3, §6 (MG212) |
+| **An override cannot cover a column a live version still references.** | Buildkite 2026: an LLM added the override. | §6.3 |
+| **Rollback compatibility:** the old version must read rows the new version wrote. | CircleCI 2021. | §2, §6 (MG812) |
+| **Locks without a new linter:** a timeout rule for Postgres and MySQL only (role-level settings accepted) with retries; Squawk imported from its JSON or GitLab output (it has no SARIF reporter). | Most migration incidents are locks and timeouts; SQLite/D1 have no lock timeout. | §6, §10 |
+| **Read-only production checks at release** (counts that predict failure, index usage) and **three sandbox levels** (empty + checks by default; opt-in rehearsal on a production copy). | Safety depends on the data, which an empty sandbox cannot see; the rehearsal is the main defence against data loss. | §2, §7 |
+| **Per-migrator ledger and order details:** comment-only edits block where the migrator checksums the whole file (Flyway); head-only history comparison for Alembic and golang-migrate; silent-skip migrators always block; duplicate versions flagged; a check after any rehearsal that every expected migration ran. | Flyway, Alembic, golang-migrate and Drizzle behaviour; Tuist 2026. | §5, §6 |
+| **SQLite/D1 cascade-rebuild rule and seeded row counts.** | drizzle-orm#4938 (open): rebuilds silently cascade-delete child rows; D1 cannot turn foreign keys off. | §6 |
+| **Hexagonal edges around a functional core:** `diff` and `classify` are pure functions; ports only where two real implementations or a test double exist; a CI check keeps drivers out of the core crate. | Testability of every rule both ways; keeps "any database" structural. | §3, §10 |
+
+Everything else below is the first version's analysis, unchanged unless marked "revised".
 
 ## 1. The answer in one page
 
@@ -37,6 +54,14 @@ the commit named, fetched 2026-11-19.
 - **The gate runs the user's own migrate command twice against one throwaway database** (merge base, then PR head),
   reads the schema after each run, diffs, and classifies each change on four axes: **B** breaks the old app still
   running, **L** locks or is slow, **D** loses data, **F** may fail on existing rows.
+- **(revised) The primary check is the mixed-version test:** with the sandbox at the PR head, run every live version's
+  tests, or load its models and run its queries, against it; then check that the old version reads rows the new one
+  wrote. The schema diff is the fast first pass and the fallback where a team has no tests. For a dropped or renamed
+  column, per-ORM reference rules ask whether any live version still uses it.
+- **(revised) Release adds read-only production checks** (counts that predict a failure, index usage) through the same
+  read-only connection as the history comparison; an opt-in rehearsal on a production copy catches data effects.
+- **(revised) A functional core:** `diff(Snapshot, Snapshot)` and `classify(changes, rules, contracts)` are pure
+  functions with no I/O; ports exist only at the edges.
 - **Rule IDs are permanent and keyed by change kind** (`MG201 drop-column`); axes and severity are data on the rule.
 - **Every suppression and contract marker must name the object and give a reason.** None of the six linters studied
   requires one (V(sub)).
@@ -45,6 +70,30 @@ the commit named, fetched 2026-11-19.
 - **Outputs:** exit codes, JSON, SARIF 2.1.0, PR comment, annotations, GitHub Action.
 
 ## 2. Components and data flow
+
+**Revised flow:**
+
+```
+pull request (no production credentials):
+  1  ledger and order checks (P1, P2): files, base ledger, per-migrator order model, duplicate versions
+  2  sandbox.create()  -> empty DB + transport + env
+  3  checkout base; migrator.migrate(env); reader.snapshot() -> A
+  4  checkout head; migrator.migrate(env); reader.snapshot() -> B; applied == expected? (silent skips)
+  5  diff(A, B) -> changes -> classify(rules, contracts)            fast first pass, PR comment
+  6  for each live version V (base, plus any declared still-serving versions):
+       run V's tests (or load V's models and queries) against the head database      PRIMARY CHECK
+       reference rules: does V still use any dropped or renamed column?
+  7  rollback compatibility: write rows with head's tests or seed, read them with V's
+  8  (optional) imported linter findings (Squawk JSON or GitLab), seeded row counts
+  9  sandbox.destroy(); report; exit code
+release (separate job, read-only role + separate migrate role):
+  history comparison (P3, full or head-only per migrator) -> stop on any difference
+  read-only production checks for risky findings (counts, index usage), time-limited
+  (optional) rehearsal on a production copy: migrate, time it, check rows and applied set
+  restore point -> migrate -> history again -> write ledger rows -> deploy, smoke tests
+```
+
+The first version's diagram follows; steps 6-8 and the release checks are what the revision adds.
 
 ```
                  +------------------ core (engine-, host-, migrator-neutral) ------------------+
@@ -100,6 +149,28 @@ interface Migrator {                   // a declarative file, interpreted by the
   silentSkip?: boolean; migrate: { command: string; env: Record<string,string> }; nativeValidate?: string
 }
 ```
+
+**Revised: ports for the mixed-version test.**
+
+```ts
+interface LiveVersion {                // base commit, plus declared still-serving versions (tags or SHAs)
+  ref: string
+  worktree(): Promise<string>          // a git worktree of that version
+}
+interface VersionRunner {              // how a version's own checks run against a given database
+  tests?: { command: string; env: Record<string,string> }   // e.g. "pytest", "pnpm test:int", "bin/rails test"
+  queries?: { command: string }        // fallback: load models and run representative queries
+  run(v: LiveVersion, db: { transport: Transport; env: Record<string,string> }): Promise<{ ok: boolean; failures: string[] }>
+}
+interface ReferenceRules {             // per ORM, data-driven where possible
+  orm: 'rails' | 'django' | 'prisma' | 'drizzle' | 'payload' | 'none'
+  usesColumn(v: LiveVersion, table: string, column: string): Promise<'used' | 'unused' | 'unknown'>
+  // rails: used unless listed in ignored_columns; prisma: used if the model declares it; none: 'unknown'
+}
+```
+
+The core stays pure: `diff` and `classify` take snapshots, the results of the version runs and the reference answers as
+data, and return findings. A port exists only where there are two real implementations or a test double.
 
 The sketches use TypeScript notation for readability only; they map one-to-one onto Rust traits or Go interfaces.
 
@@ -171,6 +242,16 @@ migrate.command = "npx payload migrate"
   of 21 migrators. `silentSkip` (stable Drizzle, golang-migrate) makes an out-of-order migration an error, because the
   migrator will never run it. The graph models check that the graph stays consistent and has one head.
 - **Escape hatch:** `order = "command:<cmd>"` runs a script that prints JSON.
+- **(revised) Three more fields per migrator:**
+  - `checksum = "whole-file" | "content" | "none"`: what the migrator itself hashes. Flyway hashes every line including
+    comments (V, `ChecksumCalculator.java`), so a comment-only edit is an error there (it fails `flyway validate` in
+    production); where the migrator hashes nothing, it is a lower-severity note.
+  - `history = "full" | "head-only"`: Alembic and golang-migrate store only the current version, so P3 compares that
+    version, not a list.
+  - `tests` and `queries` (optional): how this project's own tests run against a given database, for the mixed-version
+    test; auto-detected where conventional (`pytest`, `manage.py test --keepdb`, the package's test script).
+- **Silent-skip migrators always block** on an out-of-order migration (stable Drizzle, golang-migrate: the migration
+  would never run); duplicate versions are flagged for every migrator (Tuist 2026).
 - **`nativeValidate`** runs `flyway validate` and the like for the migrators that keep their own checksums (Flyway,
   Liquibase, Sqitch, Prisma, Atlas, Supabase).
 - **Declarative is enough:** pre-commit (`clientlib.py:240-260`) and Renovate's regex manager show the style scales
@@ -206,12 +287,16 @@ migrate.command = "npx payload migrate"
 | MG003 | ledger entry rewritten or removed versus base | | | | | P1; closes the rehash bypass |
 | MG004 | new migration orders before production's last | | | | | P2, per order model |
 | MG005 | graph inconsistent or several heads | | | | | P2 (Django, Alembic, Sqitch) |
+| MG006 | two migrations with the same version | | | | | revised; Tuist 2026 |
+| MG007 | comment- or whitespace-only edit of an applied migration | | | | | revised; error where the migrator checksums the whole file (Flyway), note elsewhere |
 | MG010 | production ran a migration the repo lacks | | | | | P3 |
 | MG011 | production ran one outside a release | | | | | P3 |
 | MG012 | ledger says run, production has no record | | | | | P3 |
 | MG101 | drop table | x | | x | | |
 | MG102 | rename table | x | | | | drop + add unless explicit |
 | MG103 | table rebuilt (SQLite copy-swap, MySQL COPY) | | x | ? | | D if a column is lost |
+| MG104 | table rebuilt while children reference it with ON DELETE CASCADE | | | x | | revised; SQLite/D1, drizzle-orm#4938 |
+| MG105 | row count dropped on the seeded database | | | x | | revised; needs a seed |
 | MG201 | drop column | x | x | x | | |
 | MG202 | rename column | x | | | | |
 | MG203 | add NOT NULL column without default | x | | | x | |
@@ -220,6 +305,9 @@ migrate.command = "npx payload migrate"
 | MG206 | other type change | | x | | | |
 | MG207 | drop default | x | | | | |
 | MG208 | add or change generated or identity column | | x | | | |
+| MG209 | change a column default | x | | | | revised; breaks writes from processes with a cached schema |
+| MG210 | add a column | ? | | | | revised; note only in the diff (GitLab #5171 class); the mixed-version test decides |
+| MG212 | drop or rename a column a live version still uses | x | | x | | revised; per-ORM reference rules; no contract can cover it |
 | MG301 | add CHECK | x | x | | x | L unless NOT VALID |
 | MG302 | add UNIQUE | x | x | | x | |
 | MG303 | add FK | x | x | | x | |
@@ -227,6 +315,8 @@ migrate.command = "npx payload migrate"
 | MG305 | add or change primary key | x | x | | x | |
 | MG401 | index built without the online option | | x | | | PG CONCURRENTLY, MySQL INPLACE |
 | MG402 | drop index | | | | | note only |
+| MG403 | drop or alter an index production still scans | | x | | | revised; release-time production check |
+| MG411 | migration sets no lock or statement timeout | | x | | | revised; Postgres and MySQL only; role-level settings accepted; pair with retries |
 | MG501 | drop or rename view | x | | | | |
 | MG502 | view columns changed | x | | | | |
 | MG503 | add trigger | x | | | | can reject old writes |
@@ -238,6 +328,11 @@ migrate.command = "npx payload migrate"
 | MG701 | DML in a migration | | x | ? | | statement capture; needs review |
 | MG702 | UPDATE or DELETE without WHERE | | x | x | | |
 | MG801 | reader blind to a kind the migration touched | | | | | "not checked" |
+| MG802 | an expected migration did not apply (sandbox or rehearsal) | | | | | revised; silent skips |
+| MG810 | a live version's tests fail against the migrated database | x | | | | revised; the primary check |
+| MG811 | a live version's queries fail against the migrated database | x | | | | revised; fallback when there are no tests |
+| MG812 | a live version cannot read rows the new version wrote | x | | | | revised; rollback compatibility |
+| MG820 | imported finding (Squawk or another linter) | | x | | | revised; level mapped from the source |
 | MG901 | marker without a reason, or matching nothing | | | | | hygiene |
 
 ### 6.3 Contract markers and suppressions
@@ -252,6 +347,9 @@ Syntax, in any comment style in the migration file, or as `[[contract]]` in conf
   the same (V(sub)).
 - **Stale markers fail. MG001-MG003 and MG010-MG012 cannot be suppressed. Every accepted contract is listed in the PR
   comment.**
+- **(revised) A contract cannot cover MG212 or MG810-MG812:** a column a live version still uses, or a failing
+  mixed-version test, stays an error whatever the marker says. The fix is the expand/contract order (stop using it, ship,
+  then drop), not a marker. Buildkite 2026 is the case: an LLM-assisted workflow added the override.
 
 ### 6.4 Data migrations (secondary capture)
 
@@ -262,6 +360,9 @@ Syntax, in any comment style in the migration file, or as `[[contract]]` in conf
   here, see `stack.md`), reported as "review", never as a pass.
 - **PGlite capture:** U.
 - **Optional `seed.sql`**, run after the base migrations, with per-table row counts and hashes compared. Off by default.
+  (revised) It feeds MG105 and the rollback-compatibility check (MG812).
+- **(revised) The rehearsal on a production copy is the main defence against data effects** (GitLab #6072, GitHub
+  2023-09, drizzle-orm#4938), which no schema diff sees. See §7.
 
 ## 7. Throwaway databases, all engines
 
@@ -278,6 +379,15 @@ Syntax, in any comment style in the migration file, or as `[[contract]]` in conf
 
 - **Default:** the cheapest provider that matches production's engine version. Report the sandbox version next to
   production's.
+- **(revised) Three levels, each finding labelled with the level that produced it:**
+  1. **Empty sandbox** (default, pull request): schema diff, mixed-version test, reference rules.
+  2. **Read-only production checks** (default, release): one bounded, time-limited query per risky finding through the
+     read-only connection: NULLs for a new NOT NULL, duplicates for a new UNIQUE, orphans for a new FK, the longest value
+     for a narrowed type, the catalog's row estimate for lock risk, index-scan counts before dropping an index (MG403).
+     Counts only; no rows leave production; a timeout reports "not checked", never a pass.
+  3. **Rehearsal on a production copy** (opt-in, protected job): `pg_dump`/`pg_restore`, a restored host snapshot, a
+     Neon branch, later other adapters (a GFS full clone once the general solution is proven). Measures duration and
+     catches failures nobody thought to query. Copying production data needs masking or a deliberate decision.
 - **PGlite is one PG version without most extensions (R),** so it is a fidelity risk.
 - **Reset with `CREATE DATABASE … TEMPLATE`** (V(sub), testcontainers-go `modules/postgres/postgres.go:269-310`).
 
@@ -326,6 +436,9 @@ Syntax, in any comment style in the migration file, or as `[[contract]]` in conf
 **Consequence:** a restore point is an id plus the exact restore command and its retention, printed before migrating. It
 is not a one-click rollback.
 
+**(revised) Many databases per host:** per-tenant setups (common on D1, which caps a database at 10 GB) need the history
+comparison, the production checks and the migration itself run across every tenant database, with one report.
+
 ## 9. Ledger and trust
 
 - **Hash:** sha256 of the file with the BOM removed and CRLF or CR turned into LF. Prisma PR #2101 (merged 2021-08-03)
@@ -358,6 +471,10 @@ Advanced Security, so also emit annotations and one sticky PR comment).
 **Packaging:** a GitHub Action (`fetch-depth: 0`, sandbox setup, `check`, SARIF upload, sticky PR comment); pre-commit
 for ledger checks only; CLI verbs `check`, `release`, `snapshot`, `explain`.
 
+**(revised) Imported findings:** Squawk has no SARIF reporter (its `--reporter` values are `tty, gcc, json, gitlab`;
+V), so migate reads its JSON or GitLab output and reports each finding as MG820 with the source rule's name. migate's
+own output stays SARIF for GitHub code scanning.
+
 **Auto-detection (R):** prisma/migrations with migration_lock.toml; drizzle.config with meta/_journal.json; wrangler
 `d1_databases[].migrations_dir`; a `@payloadcms/db-*` dependency; db/migrate with a Gemfile naming rails; manage.py with
 `*/migrations/0001_*.py`; alembic.ini; flyway.toml/conf; knexfile; sqitch.plan; atlas.hcl; supabase/config.toml. When
@@ -376,6 +493,9 @@ sandbox = "miniflare-local"        # postgres: "pglite" | "container:postgres:16
 kind = "d1"                        # or url, neon, rds, ...
 database = "app-db"
 restore_point = true
+[versions]                         # revised: the mixed-version test
+tests = "pnpm --filter @app/api test:int"    # run against the migrated database; auto-detected when omitted
+live = ["base"]                    # plus tags or SHAs still serving traffic (e.g. under skew protection)
 [rules]
 MG401 = "off"
 MG203 = { level = "error" }
@@ -389,6 +509,8 @@ reason = "both Workers stopped reading it in release 42"
 **Language constraints.**
 - **Not constrained:** sandboxes, migrators and hosts are subprocesses or SQL behind a transport. PGlite ships a
   `pglite-server` CLI (V).
+- **(revised) Decided:** Rust, one binary (`stack.md`). The mixed-version test runs the team's own test command as a
+  subprocess, so it adds no language constraint.
 - **Mildly constrained:** a single-binary CI tool favours Go or Rust. Drivers for all four engines exist in Go, Rust and
   Node (`stack.md`).
 - **Trap (V, hit while probing):** a JavaScript host running PGlite in-process must start the migrator asynchronously. A
@@ -424,6 +546,17 @@ migrators (Payload, Prisma, Rails) in a sandbox, statement capture, CI timings.
 - **Reading Miniflare's file directly:** its layout is internal.
 
 ## 13. Open risks, ranked
+
+**(revised) Added by the review:**
+- **The mixed-version test's cost and reliability are unmeasured.** Running a live version's test suite against the
+  migrated database may be slow or flaky for small teams, and many projects have tests that do not touch the database.
+  Spike TASK-31 measures it on the Payload-on-D1 app and a Django sample.
+- **Reference rules are per ORM and partial.** Rails and Prisma are understood; Django, Drizzle and Payload are not yet
+  verified; raw SQL and query builders give "unknown", never "unused".
+- **Declaring every live version** needs the team to say which versions still serve traffic; a wrong list misses an
+  old version.
+
+**First version's ranking:**
 
 1. **Running arbitrary migrators in a sandbox.** It needs the app's runtime, config and secrets; Payload's D1 path needs a
    worktree; Prisma needs CREATEDB. Only PG with a toy migrator is proven.

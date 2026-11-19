@@ -30,6 +30,6 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
   a GFS-dedicated feature only once it works for most databases.
 - Rust; Apache-2.0; pure open source, no revenue.
 
-## Open
-- `docs/research/architecture.md` still describes the design before the validation and the blind review; updating it is
-  the next task.
+## Next
+- Two spikes test the riskiest assumptions before any Rust is written: whether real migrators (Payload, Prisma,
+  Django) run in the throwaway-database flow, and what the mixed-version test costs and catches.
