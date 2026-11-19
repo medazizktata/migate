@@ -3,6 +3,7 @@
 //! Everything here is a pure function over data; I/O lives in adapter crates (see
 //! `docs/research/architecture.md`, sections 0 and 3).
 
+pub mod contract;
 pub mod diff;
 pub mod finding;
 pub mod hash;

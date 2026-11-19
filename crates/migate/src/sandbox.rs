@@ -4,11 +4,12 @@
 //! diff and classify; then run the base version's tests against the migrated database, which is what the version still
 //! serving traffic meets after the deploy (`docs/research/spike-7.md`, `spike-31.md`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use migate_core::contract;
 use migate_core::diff::{classify, diff};
 use migate_core::{Finding, Severity};
 use migate_migrators::Migrator;
@@ -86,6 +87,23 @@ pub fn run(
     let base_co = Checkout::add(root, base, &tmp.0.join("base"))?;
     let head_co = Checkout::add(root, "HEAD", &tmp.0.join("head"))?;
     let (base_dir, head_dir) = (base_co.0.join(prefix.trim()), head_co.0.join(prefix.trim()));
+
+    // Contract markers count only in migrations this change adds: an old one would otherwise accept future changes.
+    let at_base: BTreeSet<String> = project::read(&base_dir, migrator)?
+        .files
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    let (mut markers, mut bad_markers) = (Vec::new(), Vec::new());
+    for f in project::read(&head_dir, migrator)?
+        .files
+        .into_iter()
+        .filter(|f| !at_base.contains(&f.path))
+    {
+        let (m, bad) = contract::parse(&f.path, &String::from_utf8_lossy(&f.bytes));
+        markers.extend(m);
+        bad_markers.extend(bad);
+    }
 
     if let Some(setup) = &cfg.setup {
         for (name, d) in [("base", &base_dir), ("head", &head_dir)] {
@@ -197,27 +215,28 @@ pub fn run(
                         tail(&out)
                     ),
                 ));
-                return Ok(findings);
-            }
-            // Calibration, after a pass: the database must still be the migrated one, and the tests must notice
-            // when its tables are gone.
-            let still =
-                migate_engine_sqlite::count_rows(&path, &migrator.history.query).unwrap_or(0);
-            if still < history {
-                return Err(invalid(format!(
-                    "the migration history went from {history} rows to {still} during the tests: they rebuilt the \
+            } else {
+                // Calibration, after a pass: the database must still be the migrated one, and the tests must notice
+                // when its tables are gone.
+                let still =
+                    migate_engine_sqlite::count_rows(&path, &migrator.history.query).unwrap_or(0);
+                if still < history {
+                    return Err(invalid(format!(
+                        "the migration history went from {history} rows to {still} during the tests: they rebuilt the \
                      database instead of using the migrated one"
-                )));
-            }
-            migate_engine_sqlite::drop_all_but(&path, &migrator.history.query).map_err(sql_err)?;
-            eprintln!("migate: checking the tests notice a database with its tables dropped");
-            if sh(&vars(test), &base_dir, &env)?.status.success() {
-                return Err(invalid(
+                    )));
+                }
+                migate_engine_sqlite::drop_all_but(&path, &migrator.history.query)
+                    .map_err(sql_err)?;
+                eprintln!("migate: checking the tests notice a database with its tables dropped");
+                if sh(&vars(test), &base_dir, &env)?.status.success() {
+                    return Err(invalid(
                     "the base version's tests still pass with every table but the migration history dropped, so they \
                      never used the migrated database (a stub command, or a framework that makes its own test \
                      database)"
                         .into(),
                 ));
+                }
             }
         }
         (None, _) => findings.push(Finding::new(
@@ -228,6 +247,8 @@ pub fn run(
         )),
         (Some(_), false) => {}
     }
+    let mut findings = contract::apply(findings, &markers);
+    findings.extend(bad_markers);
     Ok(findings)
 }
 

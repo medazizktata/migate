@@ -80,8 +80,10 @@ serving traffic, and does it match what production actually ran?**
 
 **When a breaking change is intended,** you mark it as the "contract" step of an expand/contract change, naming the
 object and giving a reason. The override is listed in the pull request comment for a human to see, and it can never
-cover a column that a live version still uses. *Planned; until then an intended breaking change fails the gate with no
-way to accept it.*
+cover a column that a live version still uses. *Built, for the throwaway-database run: a comment in a new migration,
+`-- migate: contract drop-column users.legacy -- unused since v42`, turns that one finding into a note; no reason, or no
+matching finding, fails (MG901); a failing old-version test can never be accepted. Planned: the pull request comment
+that lists accepted contracts.*
 
 An illustrative pull request comment (the format is not built yet):
 

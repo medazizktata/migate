@@ -239,6 +239,12 @@ pub const RULES: &[Rule] = &[
         description: "The base version's tests fail against the migrated database. The version still running in production would break when this deploys.",
         axes: "B",
     },
+    Rule {
+        id: "MG901",
+        name: "bad-contract-marker",
+        description: "A contract marker has no reason, names a rule that cannot be accepted, or matches no finding. Markers accept one intended change; a stale one would hide the next.",
+        axes: "",
+    },
 ];
 
 /// The catalogue entry for a rule ID.

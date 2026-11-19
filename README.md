@@ -46,6 +46,17 @@ test = "npm test"                      # the base version's tests: run on base's
                                        # emptied copy, so a run that never used the database is "not checked"
 ```
 
+An intended breaking change (the contract step of expand/contract) is accepted by a comment in the new migration, naming
+one rule and one object, with a reason:
+
+```sql
+-- migate: contract drop-column users.legacy -- the app stopped using it in v42
+ALTER TABLE users DROP COLUMN legacy;
+```
+
+The finding stays in the report as a note. A marker with no reason, or one that matches nothing, is an error (MG901),
+and nothing accepts a failing old-version test.
+
 Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--format sarif` for machines.
 
 ## Direction (the owner's, 2026-11-19)

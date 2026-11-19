@@ -810,3 +810,60 @@ fn payload_seed_files_are_not_migrations() {
         "{text}"
     );
 }
+
+/// A base version that no longer reads or writes `legacy` (Rails' ignored_columns, done in an earlier release).
+const OLD_APP_WITHOUT_LEGACY: &str = r#"import os, sqlite3
+con = sqlite3.connect(os.environ["D1_PATH"])
+con.execute("INSERT INTO users (email) VALUES ('a@b.c')")
+print(con.execute("SELECT id, email FROM users").fetchall())
+"#;
+
+const DROP_WITH_CONTRACT: &str = "-- migate: contract drop-column users.legacy -- unused since v42 (ignored_columns)\nALTER TABLE users DROP COLUMN legacy;";
+
+#[test]
+fn a_contract_accepts_an_intended_drop_the_old_version_no_longer_uses() {
+    // A marker in a migration already merged does not count (it would be stale here, and fail).
+    let first =
+        format!("{INIT}\n-- migate: contract drop-column users.gone -- an old release's marker");
+    let r = sandbox_repo_full(
+        SANDBOX_TOML,
+        OLD_APP_WITHOUT_LEGACY,
+        &first,
+        DROP_WITH_CONTRACT,
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("MG201")
+            && out.contains("accepted by the contract at migrations/0002_change.sql:1"),
+        "{out}"
+    );
+    assert!(
+        out.contains("unused since v42") && !out.contains("MG901"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_contract_cannot_cover_a_column_the_old_version_still_uses() {
+    let r = sandbox_repo(SANDBOX_TOML, DROP_WITH_CONTRACT);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("error   MG810"),
+        "the tests' evidence stands: {out}"
+    );
+}
+
+#[test]
+fn a_contract_without_a_reason_or_matching_nothing_fails() {
+    for second in [
+        "-- migate: contract drop-column users.legacy\nALTER TABLE users DROP COLUMN legacy;",
+        "-- migate: contract drop-column users.nickname -- stale\nALTER TABLE users DROP COLUMN legacy;",
+    ] {
+        let r = sandbox_repo_with(SANDBOX_TOML, OLD_APP_WITHOUT_LEGACY, second);
+        let (code, out, err) = sandbox_check(&r, &[]);
+        assert_eq!(code, 2, "{second}: {out}{err}");
+        assert!(out.contains("error   MG901"), "{second}: {out}");
+    }
+}
