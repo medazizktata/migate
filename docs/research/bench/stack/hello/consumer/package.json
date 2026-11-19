@@ -1,0 +1,1 @@
+{"name":"consumer","private":true,"dependencies":{"mg-hello":"file:../pkg"}}

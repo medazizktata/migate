@@ -1,0 +1,6 @@
+rust-rusqlite      runs=30 median=  7.42 mean=  8.72 sd= 4.49 min=  6.78 ms
+go-mattn           runs=30 median= 11.59 mean= 12.31 sd= 2.39 min=  9.93 ms
+go-modernc         runs=30 median= 14.84 mean= 16.11 sd= 4.26 min= 12.06 ms
+node:sqlite        runs=30 median= 21.55 mean= 31.16 sd=21.54 min= 14.92 ms
+bun:sqlite         runs=30 median= 10.82 mean= 11.88 sd= 3.50 min=  8.83 ms
+deno node:sqlite   runs=30 median= 28.29 mean= 31.42 sd=10.22 min= 24.17 ms

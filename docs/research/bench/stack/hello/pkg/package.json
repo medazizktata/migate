@@ -1,0 +1,1 @@
+{"name":"mg-hello","version":"1.0.0","bin":{"mg-hello":"cli.mjs"}}

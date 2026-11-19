@@ -1,0 +1,10 @@
+== introspectors on an empty db (expect zeros)
+introspect/bin/rusqlite: {"objects":0,"tables":0,"views":0,"triggers":0,"columns":0,"indexes":0,"indexColumns":0,"fks":0}
+introspect/bin/mattn: {"objects":0,"tables":0,"views":0,"triggers":0,"columns":0,"indexes":0,"indexColumns":0,"fks":0}
+introspect/bin/modernc: {"objects":0,"tables":0,"views":0,"triggers":0,"columns":0,"indexes":0,"indexColumns":0,"fks":0}
+node introspect/node_sqlite.mjs: {"objects":0,"tables":0,"views":0,"triggers":0,"columns":0,"indexes":0,"indexColumns":0,"fks":0}
+bun introspect/bun_sqlite.mjs: {"objects":0,"tables":0,"views":0,"triggers":0,"columns":0,"indexes":0,"indexColumns":0,"fks":0}
+== inproc.py guard on empty db (expect AssertionError)
+AssertionError: EMPTY RUN CAUGHT: {"objects":0,"tables":0,"views":0,"triggers":0,"columns":0,"indexes":0,"indexColumns":0,"fks":0} introspect_ms=0.31
+== PG counts on a fresh PGlite with no migrate run, expect zeros
+{"tables":0,"views":0,"triggers":0,"columns":0,"indexes":0,"fks":0,"checks":0}

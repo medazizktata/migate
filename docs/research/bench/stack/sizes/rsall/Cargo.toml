@@ -1,0 +1,16 @@
+[package]
+name = "rsall"
+version = "0.1.0"
+edition = "2021"
+
+# Size probe: one binary linking a driver for each of SQLite, Postgres, MySQL and SQL Server.
+[dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+postgres = "0.19"
+mysql = { version = "28", default-features = false, features = ["minimal-rust"] }
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls"] }
+tokio = { version = "1", features = ["rt", "net"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+
+[profile.release]
+strip = true

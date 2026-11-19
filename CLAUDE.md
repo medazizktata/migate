@@ -1,7 +1,8 @@
 # migration-guard: project notes for Claude
 
-Read `README.md`, then `docs/research.md` and `docs/transcript.md` before proposing anything: they hold the research,
-the design and the owner's direction (any database; D1 first; PostgreSQL second).
+Read `README.md`, then `docs/research/README.md` (and the reports it links) and `docs/transcript.md` before proposing
+anything: they hold the research, the design and the owner's direction (any database and any host; D1 is one host of
+the SQLite engine and may be an early plug-in, never the product's identity; PostgreSQL early).
 
 - Nothing is decided about name, language or licence: ask the owner, give a recommendation, do not assume.
 - The prior art in `docs/prior-art/the Payload-on-D1 app/` is a starting point with known limits (see its ADR's review section): a

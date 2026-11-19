@@ -1,0 +1,14 @@
+hello/hello-rs                          0.33 MB   gzip   0.15 MB
+hello/go/hello-go                       2.32 MB   gzip   1.36 MB
+hello/go/hello-go-stripped              1.51 MB   gzip   0.65 MB
+hello/hello-bun                        55.37 MB   gzip  22.29 MB
+hello/hello-deno                       64.53 MB   gzip  27.36 MB
+introspect/bin/rusqlite                 2.00 MB   gzip   1.01 MB
+introspect/bin/mattn                    6.72 MB   gzip   4.51 MB
+introspect/bin/mattn-stripped           3.58 MB   gzip   1.64 MB
+introspect/bin/modernc                  9.49 MB   gzip   5.55 MB
+introspect/bin/modernc-stripped         6.17 MB   gzip   2.64 MB
+introspect/bin/bun-compiled            55.37 MB   gzip  22.29 MB
+introspect/bin/deno-compiled           64.53 MB   gzip  27.36 MB
+sizes/goall/goall-stripped              7.14 MB   gzip   3.08 MB
+sizes/rsall-bin                         7.89 MB   gzip   3.66 MB

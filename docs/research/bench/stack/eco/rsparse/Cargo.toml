@@ -1,0 +1,12 @@
+[package]
+name = "rsparse"
+version = "0.1.0"
+edition = "2021"
+
+# Probe: Postgres's own parser (pg_query.rs) and the multi-dialect sqlparser-rs on the same file.
+[dependencies]
+pg_query = "18"
+sqlparser = "0.64"
+
+[profile.release]
+strip = true

@@ -1,4 +1,14 @@
-# A migration guard for any migrator, database and host: research
+# A migration guard for any migrator, database and host: first-pass research
+
+> **Superseded in part by the second round** (`README.md` in this folder, with `gap.md`, `architecture.md`, `stack.md`).
+> Corrections to this page:
+> - **Imprecise:** "Atlas `migrate lint` paid since v0.38". It left the free hosted plan, but the command is still in
+>   Atlas's open-source code (`cmdapi.go:644`); Atlas's own Community page says otherwise (`gap.md` §1.2).
+> - **Wrong as a basis for reuse:** "Atlas's schema inspectors are reusable". Its open inspectors read neither triggers
+>   nor views, the objects this design compares schemas to catch (`architecture.md` §1).
+> - **Superseded:** the Go-over-Atlas packaging recommendation (§4); see `stack.md`.
+> - **Re-framed:** the gaps and verdict below lead with D1. The owner's direction is any database and any host; D1 is
+>   one host of the SQLite engine (`gap.md`).
 
 Date: 2026-11-19. Question from the owner: could the migration protection built in the project it came from become a separate,
 plug-and-play project for any database and any infrastructure?

@@ -1,0 +1,10 @@
+[package]
+name = "introspect"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+[profile.release]
+strip = true
