@@ -1014,11 +1014,11 @@ fn schema_findings_point_at_the_migration_that_made_them() {
     let (code, out, err) = sandbox_check(&r, &[]);
     assert_eq!(code, 2, "{out}{err}");
     assert!(
-        out.contains("main.users.legacy: column dropped (migrations/0003_drop.sql:2)"),
+        out.contains("main.users.legacy (migrations/0003_drop.sql:2): column dropped"),
         "{out}"
     );
     assert!(
-        out.contains("main.users.nickname: column added (migrations/0002_change.sql:1)"),
+        out.contains("main.users.nickname (migrations/0002_change.sql:1): column added"),
         "{out}"
     );
     let json = Command::new(env!("CARGO_BIN_EXE_migate"))

@@ -400,22 +400,96 @@ fn sh(command: &str, dir: &Path, env: &BTreeMap<String, String>) -> Result<Outpu
     out
 }
 
-/// The last lines of a command's output, for the report.
+/// What a failed command said, for the report: exit status, then [`excerpt`] of its output.
 fn tail(out: &Output) -> String {
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let lines: Vec<&str> = text.lines().collect();
     let code = out
         .status
         .code()
         .map_or("a signal".into(), |c| c.to_string());
-    format!(
-        "(exit {code})\n{}",
-        lines[lines.len().saturating_sub(15)..].join("\n")
-    )
+    format!("(exit {code})\n{}", excerpt(&text))
+}
+
+/// The lines a reader needs from a failing command: those reporting a failure (up to 10), then the last 5 for the
+/// summary; the last 15 when nothing reads as a failure. Colour codes are removed. A test runner prints its summary
+/// after the error, so the last lines alone hid the cause.
+fn excerpt(text: &str) -> String {
+    let plain = strip_ansi(text);
+    let lines: Vec<&str> = plain.lines().filter(|l| !l.trim().is_empty()).collect();
+    let failing = |l: &&str| {
+        let l = l.to_ascii_lowercase();
+        ["error", "fail", "exception", "traceback", "assert"]
+            .iter()
+            .any(|w| l.contains(w))
+    };
+    let tail_from = lines.len().saturating_sub(5);
+    let mut keep: Vec<&str> = lines[..tail_from]
+        .iter()
+        .copied()
+        .filter(failing)
+        .take(10)
+        .collect();
+    if keep.is_empty() {
+        return lines[lines.len().saturating_sub(15)..].join("\n");
+    }
+    keep.push("...");
+    keep.extend(&lines[tail_from..]);
+    keep.join("\n")
+}
+
+/// Text without terminal escape sequences (`ESC [ ... letter`).
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for c in chars.by_ref() {
+                if ('@'..='~').contains(&c) {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::excerpt;
+
+    #[test]
+    fn the_excerpt_keeps_the_failure_and_the_summary_without_colour() {
+        let mut out = String::from(
+            "\u{1b}[32m RUN \u{1b}[39m v3\n\u{1b}[31mFAIL\u{1b}[39m tests/users.test.ts > creates a user\n",
+        );
+        out.push_str("\u{1b}[31mError: table users has no column named legacy\u{1b}[39m\n");
+        for i in 0..20 {
+            out.push_str(&format!("    at frame {i}\n"));
+        }
+        out.push_str(" Test Files  1 failed | 4 passed (5)\n");
+        let got = excerpt(&out);
+        assert_eq!(
+            got,
+            "FAIL tests/users.test.ts > creates a user\nError: table users has no column named legacy\n...\n    at frame 16\n    at frame 17\n    at frame 18\n    at frame 19\n Test Files  1 failed | 4 passed (5)"
+        );
+    }
+
+    #[test]
+    fn output_with_no_failure_line_keeps_its_last_fifteen_lines() {
+        let out: String = (0..30).map(|i| format!("line {i}\n")).collect();
+        let got = excerpt(&out);
+        assert!(
+            got.starts_with("line 15\n") && got.ends_with("line 29"),
+            "{got}"
+        );
+    }
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {

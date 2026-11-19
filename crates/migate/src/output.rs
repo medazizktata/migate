@@ -62,12 +62,18 @@ fn text(findings: &[Finding], cx: &Context) -> String {
         let place =
             f.at.as_ref()
                 .map_or(String::new(), |(file, line)| format!(" ({file}:{line})"));
+        // The place goes on the finding's first line, before a multi-line message's detail.
+        let (first, rest) = f.message.split_once('\n').unwrap_or((&f.message, ""));
+        let rest = if rest.is_empty() {
+            String::new()
+        } else {
+            format!("\n{rest}")
+        };
         out.push_str(&format!(
-            "{:<8}{}  {}: {}{place}\n",
+            "{:<8}{}  {}{place}: {first}{rest}\n",
             level(f.severity),
             f.rule,
             f.object,
-            f.message
         ));
     }
     let (e, w, n) = counts(findings);
