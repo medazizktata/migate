@@ -38,6 +38,14 @@ Cargo builds on this machine go through the `CARGO_TARGET_DIR` wrapper in `~/.zs
 
 The fetched third-party pages and raw API responses (about 23 MB) are not committed.
 
+## spike-7/ (real migrators in the sandbox, `../spike-7.md`)
+
+- `flow.sh <repo> <base> <head> <outdir> <reset-cmd> <migrate-cmd> <snap-cmd>`: the two-checkout flow; prints the
+  schema diff and exits with the head run's exit code.
+- `snap_sqlite.sh <db>` (reads a copy, WAL included), `snap_pg.sh`: schema snapshots; `mkheads.sh`: the four head
+  branches; `timeloop.sh`: repeated timings.
+- `jail.sb`: `sandbox-exec -D WORKDIR=<dir> -f jail.sb <cmd>` denies non-loopback network and writes outside WORKDIR.
+
 ## arch/ (architecture probes, `../architecture.md` §11)
 
 - `probe/sqlite-introspect.mjs`: full SQLite catalog read with node:sqlite, including partial and expression indexes and

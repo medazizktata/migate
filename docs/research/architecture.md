@@ -329,6 +329,8 @@ migrate.command = "npx payload migrate"
 | MG702 | UPDATE or DELETE without WHERE | | x | x | | |
 | MG801 | reader blind to a kind the migration touched | | | | | "not checked" |
 | MG802 | an expected migration did not apply (sandbox or rehearsal) | | | | | revised; silent skips |
+| MG803 | a failed migration left changes behind (not atomic) | | | x | | spike-7: Prisma and stock Payload on D1 |
+| MG804 | the sandbox was not the database migrated (no history rows after the base run) | | | | | spike-7: a misnamed variable made Django migrate its own default database; unsuppressable |
 | MG810 | a live version's tests fail against the migrated database | x | | | | revised; the primary check |
 | MG811 | a live version's queries fail against the migrated database | x | | | | revised; fallback when there are no tests |
 | MG812 | a live version cannot read rows the new version wrote | x | | | | revised; rollback compatibility |
@@ -558,7 +560,9 @@ migrators (Payload, Prisma, Rails) in a sandbox, statement capture, CI timings.
 
 **First version's ranking:**
 
-1. **Running arbitrary migrators in a sandbox.** It needs the app's runtime, config and secrets; Payload's D1 path needs a
+1. **Running arbitrary migrators in a sandbox.** (Partly retired by `spike-7.md`: Payload, Prisma, Django and Rails ran
+   the two-checkout flow on SQLite and Postgres, offline, with per-migrator env extras and a database location for
+   project-defined layouts.) It needs the app's runtime, config and secrets; Payload's D1 path needs a
    worktree; Prisma needs CREATEDB. Only PG with a toy migrator is proven.
 2. **"Breaks the old app" is approximated from the schema diff.** Contracts handle false positives; false negatives
    remain (partial-reject triggers, defaults the app relied on). Stronger optional mode: run the base branch's test

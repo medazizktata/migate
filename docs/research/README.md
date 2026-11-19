@@ -10,6 +10,7 @@ engine, the way RDS is one host of PostgreSQL; it may be among the first plug-in
 | `stack.md` | Which language, measured: start-up, schema reading, throwaway Postgres, drivers, parsers, distribution |
 | `validation.md` | Is the problem real and weighty: 41 classified incidents, GitLab's 101 migration incidents, the case against, kill criteria |
 | `blind-review.md` | A context-free agent's review of the M0 decisions, what was verified, and the owner's decisions after it |
+| `spike-7.md` | Spike: Payload, Prisma, Django and Rails through the two-checkout sandbox on SQLite and Postgres |
 | `first-pass.md` | The first round (landscape, 21 migrators' history tables), with corrections at the top |
 | `bench/` | The benchmark and probe sources behind the numbers, and the raw results |
 

@@ -1,0 +1,6 @@
+(version 1)
+; usage: sandbox-exec -D WORKDIR=<dir> -f jail.sb <command>   (denies non-loopback network and writes outside WORKDIR, /private/tmp, /private/var/folders, /dev)
+(allow default)
+(deny network-outbound (remote ip "*:*"))
+(allow network-outbound (remote ip "localhost:*"))
+(deny file-write* (require-not (require-any (subpath (param "WORKDIR")) (subpath "/private/tmp") (subpath "/private/var/folders") (subpath "/dev"))))
