@@ -45,10 +45,11 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
 - Every rule migate enforces gets a case it must fail and one it must pass, and is shown failing by deliberate sabotage
   before it is trusted.
 
-**How Rust resolves on the development Mac (fixed 2026-11-19):** rustup's default is Homebrew's Rust, linked as a
-toolchain (`rustup toolchain link homebrew /opt/homebrew/opt/rust`), and `~/.local/bin` holds rustup proxies for `rustc`,
-`rustdoc`, `rustfmt` and clippy next to the cargo shim. So inside a repository with a `rust-toolchain.toml` every tool
-follows the pin, and elsewhere every tool is Homebrew's. `just doctor` should show the pinned version four times.
+**Known local issue (development Mac):** `/opt/homebrew/bin` comes before rustup's `~/.cargo/bin` on the PATH, so cargo
+resolves to the pinned 1.93.1 while rustc, clippy and rustfmt resolve to Homebrew's 1.99 (`just doctor` shows it).
+Builds work, but local lints can differ from CI. A fix was applied and then undone by the owner on 2026-11-19 (TASK-42
+has both): rustup's default set to Homebrew's Rust linked as a toolchain, plus rustup proxies for rustc, rustdoc, rustfmt
+and clippy in `~/.local/bin`.
 
 ## Next
 - Both de-risking spikes are done (`docs/research/spike-7.md`, `docs/research/spike-31.md`): real migrators run in the
