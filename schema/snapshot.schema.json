@@ -344,6 +344,12 @@
               }
             },
             "deferrable": {
+              "description": "The constraint may be deferred to commit (`DEFERRABLE`).",
+              "type": "boolean",
+              "default": false
+            },
+            "initially_deferred": {
+              "description": "Checked at commit unless set otherwise (`INITIALLY DEFERRED`). SQLite defers only in this case.",
               "type": "boolean",
               "default": false
             },

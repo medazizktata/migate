@@ -1,11 +1,15 @@
 //! migate's SQLite engine (also Cloudflare D1's local files and libSQL): reads a database's schema into the canonical
 //! [`Snapshot`], and makes throwaway databases.
 //!
-//! The database is opened read-only and copied into memory with SQLite's backup API before anything is read: the
+//! Each database is opened read-only and copied into memory with SQLite's backup API before anything is read: the
 //! source is never written (not even a `-shm` file), and data still in the write-ahead log is included, which a plain
 //! file copy would miss (`docs/research/spike-31.md`).
+//!
+//! A project can keep several SQLite files (Rails 8 keeps its cache, queue and cable databases apart from the primary
+//! one): [`snapshot_files`] reads them into one snapshot, one namespace per file, the way SQLite itself names attached
+//! databases.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,9 +24,6 @@ use sha2::{Digest, Sha256};
 
 mod sql;
 use sql::{Tok, first_group, split_top_level, squash, tokens};
-
-/// SQLite's only namespace here; attached databases are not read.
-const MAIN: &str = "main";
 
 /// The kinds this reader can see. SQLite has no routines, enums or sequences, so they are never "not checked".
 pub const CAPABILITIES: [Kind; 10] = [
@@ -55,11 +56,50 @@ impl From<rusqlite::Error> for Error {
     }
 }
 
-/// Read the schema of the SQLite database at `path`.
+/// Read the schema of the SQLite database at `path`, as namespace `main`.
 ///
 /// A missing or zero-byte file is an error, never an empty snapshot: an empty snapshot compares as "nothing changed",
 /// which would turn a migration that never ran (or ran against another file) into a pass.
 pub fn snapshot(path: &Path) -> Result<Snapshot, Error> {
+    snapshot_files(&[("main", path)])
+}
+
+/// Read several SQLite files into one snapshot, each as the namespace given with it (for example `primary`, `cache`,
+/// `queue`). Names must be unique and cannot be `temp`.
+pub fn snapshot_files(files: &[(&str, &Path)]) -> Result<Snapshot, Error> {
+    let mut seen = BTreeSet::new();
+    for (ns, path) in files {
+        if ns.is_empty() || ns.eq_ignore_ascii_case("temp") || !seen.insert(ns.to_ascii_lowercase())
+        {
+            return Err(Error(format!(
+                "namespace `{ns}` is empty, reserved (temp) or given twice"
+            )));
+        }
+        check_file(path)?;
+    }
+    if files.is_empty() {
+        return Err(Error("no database files given".into()));
+    }
+    let mut copy = Connection::open_in_memory()?;
+    for (ns, path) in files {
+        let source = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        if !ns.eq_ignore_ascii_case("main") {
+            copy.execute(&format!("ATTACH DATABASE ':memory:' AS {}", quoted(ns)), [])?;
+        }
+        Backup::new_with_names(&source, "main", &mut copy, *ns)?.run_to_completion(
+            i32::MAX,
+            Duration::ZERO,
+            None,
+        )?;
+    }
+    let names: Vec<&str> = files.iter().map(|(ns, _)| *ns).collect();
+    read_namespaces(&copy, &names)
+}
+
+fn check_file(path: &Path) -> Result<(), Error> {
     let meta = std::fs::metadata(path).map_err(|e| Error(format!("{}: {e}", path.display())))?;
     if !meta.is_file() {
         return Err(Error(format!("{}: not a file", path.display())));
@@ -70,36 +110,66 @@ pub fn snapshot(path: &Path) -> Result<Snapshot, Error> {
             path.display()
         )));
     }
-    let source = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    let mut copy = Connection::open_in_memory()?;
-    Backup::new(&source, &mut copy)?.run_to_completion(i32::MAX, Duration::ZERO, None)?;
-    read(&copy)
+    Ok(())
 }
 
-/// Read the schema of an open connection's `main` database.
+/// Read every database attached to an open connection (`main` and any `ATTACH`ed one; `temp` is skipped).
 pub fn read(conn: &Connection) -> Result<Snapshot, Error> {
+    let names: Vec<String> = conn
+        .prepare("SELECT name FROM pragma_database_list WHERE name <> 'temp' ORDER BY seq")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    read_namespaces(conn, &names)
+}
+
+/// An SQL identifier, quoted.
+fn quoted(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+fn read_namespaces(conn: &Connection, namespaces: &[&str]) -> Result<Snapshot, Error> {
     let version: String = conn.query_row("SELECT sqlite_version()", [], |r| r.get(0))?;
-    let mut objects = vec![Object {
-        namespace: MAIN.into(),
-        name: MAIN.into(),
+    let mut objects = Vec::new();
+    for ns in namespaces {
+        read_namespace(conn, ns, &mut objects)?;
+    }
+    Snapshot::new(
+        "sqlite",
+        Some(version),
+        CAPABILITIES.into_iter().collect(),
+        objects,
+    )
+    .map_err(|e| Error(e.0))
+}
+
+fn read_namespace(conn: &Connection, ns: &str, objects: &mut Vec<Object>) -> Result<(), Error> {
+    objects.push(Object {
+        namespace: ns.into(),
+        name: ns.into(),
         parent: None,
         detail: Detail::Namespace {},
-    }];
+    });
 
-    let mut stmt = conn.prepare(
-        "SELECT type, name, tbl_name, coalesce(sql, '') FROM sqlite_schema \
+    let mut stmt = conn.prepare(&format!(
+        "SELECT type, name, tbl_name, coalesce(sql, '') FROM {}.sqlite_schema \
          WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name <> '_cf_KV' ORDER BY type, name",
-    )?;
+        quoted(ns)
+    ))?;
     let rows: Vec<(String, String, String, String)> = stmt
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<Result<_, _>>()?;
 
     let flags: BTreeMap<String, (bool, bool)> = conn
-        .prepare("SELECT name, strict, wr FROM pragma_table_list WHERE schema = 'main' AND type = 'table'")?
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)? != 0))))?
+        .prepare(
+            "SELECT name, strict, wr FROM pragma_table_list WHERE schema = ?1 AND type = 'table'",
+        )?
+        .query_map([ns], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)? != 0),
+            ))
+        })?
         .collect::<Result<_, _>>()?;
 
     for (kind, name, tbl, text) in &rows {
@@ -107,7 +177,7 @@ pub fn read(conn: &Connection) -> Result<Snapshot, Error> {
             "table" => {
                 let (strict, without_rowid) = flags.get(name).copied().unwrap_or((false, false));
                 objects.push(Object {
-                    namespace: MAIN.into(),
+                    namespace: ns.into(),
                     name: name.clone(),
                     parent: None,
                     detail: Detail::Table {
@@ -115,10 +185,10 @@ pub fn read(conn: &Connection) -> Result<Snapshot, Error> {
                         without_rowid,
                     },
                 });
-                read_table(conn, name, text, without_rowid, &mut objects)?;
+                read_table(conn, ns, name, text, without_rowid, objects)?;
             }
             "view" => objects.push(Object {
-                namespace: MAIN.into(),
+                namespace: ns.into(),
                 name: name.clone(),
                 parent: None,
                 detail: Detail::View {
@@ -129,7 +199,7 @@ pub fn read(conn: &Connection) -> Result<Snapshot, Error> {
             "trigger" => {
                 let (timing, events) = trigger_shape(text);
                 objects.push(Object {
-                    namespace: MAIN.into(),
+                    namespace: ns.into(),
                     name: name.clone(),
                     parent: Some(tbl.clone()),
                     detail: Detail::Trigger {
@@ -142,14 +212,7 @@ pub fn read(conn: &Connection) -> Result<Snapshot, Error> {
             _ => {} // indexes are read per table, so their origin (explicit or a UNIQUE constraint) is known
         }
     }
-
-    Snapshot::new(
-        "sqlite",
-        Some(version),
-        CAPABILITIES.into_iter().collect(),
-        objects,
-    )
-    .map_err(|e| Error(e.0))
+    Ok(())
 }
 
 /// A `pragma_table_xinfo` row: cid, name, declared type, not null, default, pk position, hidden.
@@ -166,22 +229,34 @@ struct ColumnText {
     autoincrement: bool,
 }
 
+/// What only the `CREATE TABLE` text says about a table.
+#[derive(Debug, Default)]
+struct TableText {
+    /// Lower-cased column name -> what its definition says.
+    columns: BTreeMap<String, ColumnText>,
+    /// (name, expression) of every CHECK constraint, table- or column-level.
+    checks: Vec<(String, String)>,
+    /// Lower-cased, comma-joined child columns of a foreign key -> (deferrable, initially deferred).
+    deferral: BTreeMap<String, (bool, bool)>,
+}
+
 fn read_table(
     conn: &Connection,
+    ns: &str,
     table: &str,
     text: &str,
     without_rowid: bool,
     out: &mut Vec<Object>,
 ) -> Result<(), Error> {
     let parent = Some(table.to_string());
-    let (columns_text, checks) = parse_create_table(table, text);
+    let tt = parse_create_table(table, text);
 
     // Columns: hidden 0 normal, 1 hidden (virtual tables, skipped), 2 virtual generated, 3 stored generated.
     let mut stmt = conn.prepare(
-        "SELECT cid, name, type, \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo(?1) ORDER BY cid",
+        "SELECT cid, name, type, \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo(?1, ?2) ORDER BY cid",
     )?;
     let cols: Vec<XinfoRow> = stmt
-        .query_map([table], |r| {
+        .query_map([table, ns], |r| {
             Ok((
                 r.get(0)?,
                 r.get(1)?,
@@ -210,7 +285,7 @@ fn read_table(
         if *hidden == 1 {
             continue;
         }
-        let from_text = columns_text.get(&name.to_ascii_lowercase());
+        let from_text = tt.columns.get(&name.to_ascii_lowercase());
         let generated = match hidden {
             2 | 3 => Some(Generated {
                 expression: from_text
@@ -221,7 +296,7 @@ fn read_table(
             _ => None,
         };
         out.push(Object {
-            namespace: MAIN.into(),
+            namespace: ns.into(),
             name: name.clone(),
             parent: parent.clone(),
             detail: Detail::Column(Column {
@@ -241,7 +316,7 @@ fn read_table(
 
     if !pk.is_empty() {
         out.push(Object {
-            namespace: MAIN.into(),
+            namespace: ns.into(),
             name: format!("{table}_pkey"),
             parent: parent.clone(),
             detail: Detail::PrimaryKey {
@@ -250,13 +325,13 @@ fn read_table(
         });
     }
 
-    for (name, expression) in checks {
+    for (name, expression) in &tt.checks {
         out.push(Object {
-            namespace: MAIN.into(),
-            name,
+            namespace: ns.into(),
+            name: name.clone(),
             parent: parent.clone(),
             detail: Detail::Check {
-                expression,
+                expression: expression.clone(),
                 validated: true,
             },
         });
@@ -264,10 +339,10 @@ fn read_table(
 
     // Foreign keys: SQLite keeps no constraint names, so the name is derived from the columns (stable across rebuilds).
     let mut stmt = conn.prepare(
-        "SELECT id, seq, \"table\", \"from\", \"to\", on_update, on_delete FROM pragma_foreign_key_list(?1) ORDER BY id, seq",
+        "SELECT id, seq, \"table\", \"from\", \"to\", on_update, on_delete FROM pragma_foreign_key_list(?1, ?2) ORDER BY id, seq",
     )?;
     let rows: Vec<(i64, String, String, Option<String>, String, String)> = stmt
-        .query_map([table], |r| {
+        .query_map([table, ns], |r| {
             Ok((
                 r.get(0)?,
                 r.get(2)?,
@@ -290,21 +365,24 @@ fn read_table(
         let mut ref_columns: Vec<String> = parts.iter().filter_map(|p| p.2.clone()).collect();
         if ref_columns.len() != columns.len() {
             // `REFERENCES parent` without columns means the parent's primary key.
-            ref_columns = primary_key_of(conn, &ref_table)?;
+            ref_columns = primary_key_of(conn, ns, &ref_table)?;
         }
+        let key = columns.join(",").to_ascii_lowercase();
+        let (deferrable, initially_deferred) = tt.deferral.get(&key).copied().unwrap_or_default();
         out.push(Object {
-            namespace: MAIN.into(),
+            namespace: ns.into(),
             name: format!("{table}_{}_fkey", columns.join("_")),
             parent: parent.clone(),
             detail: Detail::ForeignKey(ForeignKey {
                 columns,
-                ref_namespace: MAIN.into(),
+                // SQLite foreign keys cannot cross databases.
+                ref_namespace: ns.into(),
                 ref_table,
                 ref_columns,
                 on_delete: parts[0].4.clone(),
                 on_update: parts[0].3.clone(),
-                // shortcut: DEFERRABLE lives only in the CREATE TABLE text and is not parsed; D1 defers with a pragma.
-                deferrable: false,
+                deferrable,
+                initially_deferred,
                 validated: true,
             }),
         });
@@ -312,9 +390,9 @@ fn read_table(
 
     // Indexes: origin c = CREATE INDEX, u = a UNIQUE constraint, pk = the primary key (already read).
     let mut stmt =
-        conn.prepare("SELECT name, \"unique\", origin, partial FROM pragma_index_list(?1)")?;
+        conn.prepare("SELECT name, \"unique\", origin, partial FROM pragma_index_list(?1, ?2)")?;
     let indexes: Vec<(String, bool, String, bool)> = stmt
-        .query_map([table], |r| {
+        .query_map([table, ns], |r| {
             Ok((
                 r.get(0)?,
                 r.get::<_, i64>(1)? != 0,
@@ -325,10 +403,10 @@ fn read_table(
         .collect::<Result<_, _>>()?;
     for (index, unique, origin, partial) in indexes {
         let mut stmt = conn.prepare(
-            "SELECT cid, coalesce(name, ''), \"desc\" FROM pragma_index_xinfo(?1) WHERE key = 1 ORDER BY seqno",
+            "SELECT cid, coalesce(name, ''), \"desc\" FROM pragma_index_xinfo(?1, ?2) WHERE key = 1 ORDER BY seqno",
         )?;
         let keys: Vec<(i64, String, bool)> = stmt
-            .query_map([&index], |r| {
+            .query_map([index.as_str(), ns], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0))
             })?
             .collect::<Result<_, _>>()?;
@@ -336,17 +414,21 @@ fn read_table(
             "u" => {
                 let columns: Vec<String> = keys.into_iter().map(|k| k.1).collect();
                 out.push(Object {
-                    namespace: MAIN.into(),
+                    namespace: ns.into(),
                     name: format!("{table}_{}_key", columns.join("_")),
                     parent: parent.clone(),
                     detail: Detail::Unique { columns },
                 });
             }
             "c" => {
-                let text: String = conn
-                    .query_row("SELECT coalesce(sql, '') FROM sqlite_schema WHERE type = 'index' AND name = ?1", [&index], |r| {
-                        r.get(0)
-                    })?;
+                let text: String = conn.query_row(
+                    &format!(
+                        "SELECT coalesce(sql, '') FROM {}.sqlite_schema WHERE type = 'index' AND name = ?1",
+                        quoted(ns)
+                    ),
+                    [&index],
+                    |r| r.get(0),
+                )?;
                 let (expressions, predicate) = index_text(&text);
                 let parts = keys
                     .into_iter()
@@ -363,7 +445,7 @@ fn read_table(
                     })
                     .collect();
                 out.push(Object {
-                    namespace: MAIN.into(),
+                    namespace: ns.into(),
                     name: index,
                     parent: parent.clone(),
                     detail: Detail::Index(Index {
@@ -380,24 +462,20 @@ fn read_table(
     Ok(())
 }
 
-fn primary_key_of(conn: &Connection, table: &str) -> Result<Vec<String>, Error> {
+fn primary_key_of(conn: &Connection, ns: &str, table: &str) -> Result<Vec<String>, Error> {
     let mut stmt =
-        conn.prepare("SELECT name FROM pragma_table_info(?1) WHERE pk > 0 ORDER BY pk")?;
+        conn.prepare("SELECT name FROM pragma_table_info(?1, ?2) WHERE pk > 0 ORDER BY pk")?;
     let v: Vec<String> = stmt
-        .query_map([table], |r| r.get(0))?
+        .query_map([table, ns], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     Ok(v)
 }
 
-/// Column details and CHECK constraints that exist only in the `CREATE TABLE` text.
-fn parse_create_table(
-    table: &str,
-    text: &str,
-) -> (BTreeMap<String, ColumnText>, Vec<(String, String)>) {
-    let mut columns = BTreeMap::new();
-    let mut checks = Vec::new();
+/// Column details, CHECK constraints and foreign-key deferral that exist only in the `CREATE TABLE` text.
+fn parse_create_table(table: &str, text: &str) -> TableText {
+    let mut tt = TableText::default();
     let Some((body, _)) = first_group(text) else {
-        return (columns, checks);
+        return tt;
     };
     for item in split_top_level(&body) {
         let toks = tokens(&item);
@@ -412,6 +490,8 @@ fn parse_create_table(
         };
         let mut info = ColumnText::default();
         let mut pending_name: Option<String> = None;
+        // A table-level FOREIGN KEY (cols): its child columns, for matching the deferral to pragma_foreign_key_list.
+        let mut fk_columns: Option<String> = column.clone();
         let mut i = usize::from(column.is_some());
         while i < toks.len() {
             let t = &toks[i];
@@ -434,9 +514,21 @@ fn parse_create_table(
                     let short: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
                     format!("{table}_check_{short}")
                 });
-                checks.push((name, expression));
+                tt.checks.push((name, expression));
                 i += 2;
                 continue;
+            }
+            if t.is_kw("KEY")
+                && column.is_none()
+                && let Some(cols) = group
+            {
+                fk_columns = Some(child_columns(cols));
+            }
+            if t.is_kw("REFERENCES") {
+                let deferral = deferral(&toks[i..]);
+                if let (Some(cols), Some(d)) = (&fk_columns, deferral) {
+                    tt.deferral.insert(cols.clone(), d);
+                }
             }
             if t.is_kw("AS")
                 && let Some(expr) = group
@@ -452,10 +544,37 @@ fn parse_create_table(
             i += 1;
         }
         if let Some(name) = column {
-            columns.insert(name, info);
+            tt.columns.insert(name, info);
         }
     }
-    (columns, checks)
+    tt
+}
+
+/// `a, "B"` -> `a,b`: child columns of a table-level foreign key, as the deferral map keys them.
+fn child_columns(list: &str) -> String {
+    split_top_level(list)
+        .iter()
+        .filter_map(|c| {
+            tokens(c)
+                .first()
+                .and_then(|t| t.ident().map(str::to_ascii_lowercase))
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// After `REFERENCES …`: `(deferrable, initially deferred)` if a deferral clause is written, else `None`.
+/// `NOT DEFERRABLE` is not deferrable; SQLite defers only with `INITIALLY DEFERRED`.
+fn deferral(after_references: &[Tok]) -> Option<(bool, bool)> {
+    let pos = after_references
+        .iter()
+        .position(|t| t.is_kw("DEFERRABLE"))?;
+    let negated = pos > 0 && after_references[pos - 1].is_kw("NOT");
+    let initially_deferred = after_references[pos + 1..]
+        .windows(2)
+        .next()
+        .is_some_and(|w| w[0].is_kw("INITIALLY") && w[1].is_kw("DEFERRED"));
+    Some((!negated, !negated && initially_deferred))
 }
 
 /// From `CREATE [UNIQUE] INDEX … ON t (part, …) [WHERE predicate]`: each part's text and the predicate.

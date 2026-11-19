@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use migate_core::schema::{Detail, IndexPart, Kind, Object, Snapshot, TypeFamily};
-use migate_engine_sqlite::{Sandbox, snapshot};
+use migate_engine_sqlite::{Sandbox, read, snapshot, snapshot_files};
 use rusqlite::Connection;
 
 fn counts(s: &Snapshot) -> BTreeMap<Kind, usize> {
@@ -298,4 +298,126 @@ fn a_sandbox_starts_empty_and_cleans_up() {
     assert_eq!(counts(&sb.snapshot().unwrap()).get(&Kind::Table), Some(&1));
     drop(sb);
     assert!(!dir.exists(), "the sandbox directory was left behind");
+}
+
+#[test]
+fn foreign_key_deferral_is_read_from_the_create_text() {
+    let s = build(
+        "CREATE TABLE p (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER, UNIQUE (a, b));
+         CREATE TABLE c (
+           id INTEGER PRIMARY KEY,
+           col_deferred INTEGER REFERENCES p (id) DEFERRABLE INITIALLY DEFERRED,
+           col_plain INTEGER REFERENCES p (id) DEFERRABLE,
+           col_immediate INTEGER REFERENCES p (id) DEFERRABLE INITIALLY IMMEDIATE,
+           col_not INTEGER REFERENCES p (id) NOT DEFERRABLE INITIALLY DEFERRED,
+           col_none INTEGER REFERENCES p (id),
+           x INTEGER, y INTEGER,
+           CONSTRAINT pair FOREIGN KEY (x, \"Y\") REFERENCES p (a, b) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+         );",
+    )
+    .snapshot()
+    .unwrap();
+    let fk = |name: &str| match &get(&s, Kind::ForeignKey, Some("c"), name).detail {
+        Detail::ForeignKey(fk) => (fk.deferrable, fk.initially_deferred),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(fk("c_col_deferred_fkey"), (true, true));
+    assert_eq!(
+        fk("c_col_plain_fkey"),
+        (true, false),
+        "DEFERRABLE alone is immediate in SQLite"
+    );
+    assert_eq!(fk("c_col_immediate_fkey"), (true, false));
+    assert_eq!(
+        fk("c_col_not_fkey"),
+        (false, false),
+        "NOT DEFERRABLE wins over INITIALLY DEFERRED"
+    );
+    assert_eq!(fk("c_col_none_fkey"), (false, false));
+    assert_eq!(
+        fk("c_x_y_fkey"), // SQLite names the child column as declared (y), not as written in the constraint ("Y")
+        (true, true),
+        "a table-level, two-column key with a quoted column"
+    );
+}
+
+#[test]
+fn several_files_become_several_namespaces() {
+    let primary = build("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);");
+    let cache = build(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY);
+         CREATE TABLE entries (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users);
+         CREATE INDEX entries_user ON entries (user_id);",
+    );
+    let s = snapshot_files(&[("primary", primary.db_path()), ("cache", cache.db_path())]).unwrap();
+    assert!(s.get(Kind::Namespace, "primary", None, "primary").is_some());
+    assert!(s.get(Kind::Namespace, "cache", None, "cache").is_some());
+    // The same table name in two files stays two objects.
+    assert!(
+        s.get(Kind::Column, "primary", Some("users"), "email")
+            .is_some()
+    );
+    assert!(
+        s.get(Kind::Column, "cache", Some("users"), "email")
+            .is_none()
+    );
+    assert!(
+        s.get(Kind::Index, "cache", Some("entries"), "entries_user")
+            .is_some()
+    );
+    match &s
+        .get(
+            Kind::ForeignKey,
+            "cache",
+            Some("entries"),
+            "entries_user_id_fkey",
+        )
+        .unwrap()
+        .detail
+    {
+        Detail::ForeignKey(fk) => {
+            assert_eq!(
+                (fk.ref_namespace.as_str(), fk.ref_columns.as_slice()),
+                ("cache", &["id".to_string()][..])
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(counts(&s).get(&Kind::Table), Some(&3));
+}
+
+#[test]
+fn a_connection_with_an_attached_database_is_read_whole() {
+    let other = build("CREATE TABLE jobs (id INTEGER PRIMARY KEY, run_at TEXT NOT NULL);");
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE users (id INTEGER PRIMARY KEY);")
+        .unwrap();
+    conn.execute(
+        &format!("ATTACH DATABASE '{}' AS queue", other.db_path().display()),
+        [],
+    )
+    .unwrap();
+    let s = read(&conn).unwrap();
+    assert!(s.get(Kind::Table, "main", None, "users").is_some());
+    assert!(
+        s.get(Kind::Column, "queue", Some("jobs"), "run_at")
+            .is_some()
+    );
+}
+
+#[test]
+fn bad_namespace_names_are_refused() {
+    let a = build("CREATE TABLE t (id INTEGER);");
+    for files in [
+        vec![("temp", a.db_path())],
+        vec![("", a.db_path())],
+        vec![("x", a.db_path()), ("X", a.db_path())],
+        vec![],
+    ] {
+        assert!(
+            snapshot_files(&files).is_err(),
+            "{:?}",
+            files.iter().map(|f| f.0).collect::<Vec<_>>()
+        );
+    }
 }

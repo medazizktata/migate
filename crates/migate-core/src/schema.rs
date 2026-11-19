@@ -130,8 +130,12 @@ pub struct ForeignKey {
     /// e.g. `CASCADE`, `RESTRICT`, `NO ACTION`.
     pub on_delete: String,
     pub on_update: String,
+    /// The constraint may be deferred to commit (`DEFERRABLE`).
     #[serde(default)]
     pub deferrable: bool,
+    /// Checked at commit unless set otherwise (`INITIALLY DEFERRED`). SQLite defers only in this case.
+    #[serde(default)]
+    pub initially_deferred: bool,
     /// False for a constraint added `NOT VALID` (Postgres) that has not been validated yet.
     #[serde(default = "yes")]
     pub validated: bool,
