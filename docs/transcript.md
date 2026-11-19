@@ -423,6 +423,10 @@ To start the new project I need three decisions from you:
 
 Separately, still pending: your OK to re-download Playwright's Chromium (about 100–150 MB), so the two website fixes can be tested and committed.
 
+## User
+
+make sure to create a Claude transcript starting from my question about generalizing this tool to work on any database stack, and open a new window, terminal window, and yeah, launch that session.
+
 ## Claude
 
 The transcript is missing the research agents' reports, which are the most valuable part. They must be stored in a different record shape. Checking:
@@ -434,3 +438,37 @@ The two reports are stored differently: one as a hidden user message, the other 
 ## Claude
 
 The two agent reports are in now. Their own headings collide with the transcript's, so I'll nest them one level down. Then I'll create the project:
+
+## Claude
+
+The project exists at `~/Desktop/migration-guard`, with its first commit. Before opening the new window, checking the command that starts your Claude sessions:
+
+## Claude
+
+The launch command goes through an MCP selector (`mcp`). Checking whether it passes an opening prompt through to Claude:
+
+## Claude
+
+A new Terminal window is open in `~/Desktop/migration-guard`, with your Claude session launching there. Pick your servers in the selector as usual, then paste the first message I put on your clipboard. It asks the new session to read the research and propose a name, language, licence and first-version plan, without writing code until you've decided.
+
+**The project** (working name `migration-guard`, one commit, `6296f8f`):
+- **`README.md`**: the goal (any database, any migrator, any host), your direction (D1 first, Postgres second), and the open decisions.
+- **`CLAUDE.md`**: tells the new session to read the research first and to leave name, language and licence to you.
+- **`docs/research.md`**: the combined research report.
+- **`docs/transcript.md`**: this conversation from your question "can a tool be developed that is plug and play for any db, any target infra?" onward. It has your messages, my replies and both research agents' full reports; tool calls are left out.
+- **`docs/prior-art/the Payload-on-D1 app/`**: the migration check, release script and the origin project's decision record it grew out of.
+
+**Your agentic-browser suggestion worked.** I used the scraping pipeline's Lightpanda browser through `agent-browser` on the built site with test data:
+- **"2024 and older"** now lists 2 cars instead of an error.
+- **The empty search's "Ask us to find one"** and every other WhatsApp link on the page now use the published number.
+- **The old code fails both checks**, so the probe really tests the fixes.
+
+Committed in `3f3f833`. The Playwright tests I added for them will run in CI, since Chromium is still missing on this Mac. One slip on the way: my first probe pointed the API at an empty database and returned errors; I caught it and reran.
+
+## User
+
+And does the new Claude session that is part of the migration guard repo contain like the questions, the prompts, the answers that we asked in this session?
+
+## Claude
+
+Only through a file, not as memory. A new Claude session starts empty and doesn't inherit this conversation. What it has is `docs/transcript.md` in the repo, and its `CLAUDE.md` tells it to read that first, as does the message I put on your clipboard. Checking what the transcript actually contains:
