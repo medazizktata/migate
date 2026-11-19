@@ -9,6 +9,7 @@ engine, the way RDS is one host of PostgreSQL; it may be among the first plug-in
 | `architecture.md` | Components, plug-in interfaces, the canonical schema model, the rule list, throwaway databases, hosts, the ledger |
 | `stack.md` | Which language, measured: start-up, schema reading, throwaway Postgres, drivers, parsers, distribution |
 | `validation.md` | Is the problem real and weighty: 41 classified incidents, GitLab's 101 migration incidents, the case against, kill criteria |
+| `blind-review.md` | A context-free agent's review of the M0 decisions, what was verified, and the owner's decisions after it |
 | `first-pass.md` | The first round (landscape, 21 migrators' history tables), with corrections at the top |
 | `bench/` | The benchmark and probe sources behind the numbers, and the raw results |
 
@@ -34,7 +35,8 @@ Kill criteria were fixed before searching; an incident census and a devil's advo
 
 So the design changes proposed in `validation.md` §3 lead the product with the N-1 gate, make it code-aware, harden
 contract markers, handle locks by integrating existing linters plus production checks, and make the order rule per
-migrator. They are proposals until the owner approves them.
+migrator. The owner approved them on 2026-11-19, with the corrections from `blind-review.md`, which also made a
+mixed-version test the primary check (section 6).
 
 ## 1. The gap: real, but narrower than "a migration linter"
 
@@ -125,20 +127,28 @@ its users are not on Node, the user's migrate command runs as a separate process
 
 ## 6. Decisions
 
-**Taken by the owner (2026-11-19):**
+**Taken by the owner (2026-11-19), after a blind review (`blind-review.md`):**
 - **Independent and pluggable into any system.** No vendor is a dependency of the core.
 - **The general solution first.** A GFS-dedicated feature (for example a rehearsal on a `gfs clone <source> <target>`
   full copy, upstream GFS PR #201, still open) comes only once the core works for most databases, as a fork or an
   optional adapter.
-- **Leaning to Rust** ("I'm pro Rust"); not yet formally confirmed.
+- **The primary check is a mixed-version test:** migrate a throwaway database to the new head, then run every live
+  version's tests (or at least load its models and run its queries) against it. The schema diff is the fast first pass,
+  the fallback where a team has no tests, and the source of the PR comment. A rehearsal on a production copy is the main
+  defence against data loss.
+- **The design changes in `validation.md` §3 are approved, with the blind review's corrections** (`blind-review.md` §2):
+  per-ORM reference rules (Rails: in use unless in `ignored_columns`), all live versions, rollback compatibility,
+  comment-only edits judged per migrator, Squawk imported from JSON/GitLab output (it has no SARIF), timeouts for
+  Postgres and MySQL only, head-only history comparison for Alembic and golang-migrate, plus index-usage, silent-skip,
+  row-count, cascade-rebuild and multi-tenant checks.
+- **Rust**, shipped through npm, pip, Homebrew and a GitHub Action.
+- **Apache-2.0; no revenue,** pure open source (sustainability noted as a risk).
+- **Engine order:** SQLite (including D1) first as the build and dogfood target, PostgreSQL next (both in the first
+  release; Postgres leads the public launch), then MySQL/MariaDB, then SQL Server; MongoDB gets the ledger and history
+  layers only.
+- **Name: `migate`.** Free on npm, crates.io and Homebrew; taken on PyPI, so the pip package is `migate-cli`.
 
-**Still open:**
-1. **Name:** `migration-guard` is a placeholder. Check the npm, crates.io, PyPI and GitHub names before choosing.
-2. **Licence:** Apache-2.0 suggested (matches sqlparser-rs; promises the checks stay free, which this market rewards).
-3. **Engine order:** the gap research suggests SQLite/D1 first as the build and dogfood target, PostgreSQL second and
-   leading the public launch, then MySQL/MariaDB, then SQL Server; MongoDB gets the ledger and history layers only.
-4. **The design changes in `validation.md` §3.**
-5. **Revenue:** none stated. The paid market buys platforms, not CLIs (`validation.md` §2.4).
+**Still open:** renaming the repository folder from `migration-guard` (it also moves the local Claude memory path).
 
 **Ideas from the discussion, not yet in `architecture.md`:**
 - **Read-only production checks at release:** for each risky change, one count through the read-only connection the
