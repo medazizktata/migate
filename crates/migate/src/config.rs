@@ -54,8 +54,8 @@ pub struct Sandbox {
     /// leave behind, they show data a migration loses.
     pub seed: Option<String>,
     /// The base version's tests. Run three times: on the database at base (they must pass, or their verdict means
-    /// nothing), at head (the check), and after a pass, on a copy with every table but the migration history dropped
-    /// (they must fail, or they never used the database).
+    /// nothing), at head (the check), and after a pass, on the same throwaway database with every table but the migration
+    /// history dropped (they must fail, or they never used the database).
     pub test: Option<String>,
 }
 

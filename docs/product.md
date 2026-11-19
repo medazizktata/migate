@@ -185,8 +185,10 @@ planned before large-database support is claimed.
   fail; safe changes must pass. (Shown in a spike on Django, Rails and a real Payload app.)
 - **Few false alarms:** a safe contract step (a column the old code no longer uses) must pass; every false alarm found
   becomes a fixture.
-- **It stays fast enough:** about one integration-test run per live version (measured at about 2 minutes on a real
-  Payload app, seconds on small apps); the schema check is under a second.
+- **It stays fast enough:** up to three runs of the old version's tests per live version (on its own database first,
+  after the migration, and on the database with its tables dropped, so a run that never used the database is caught).
+  Measured at 3.5 to 6 minutes on a real Payload app whose integration suite takes about 97 s, seconds on small apps;
+  the schema check is under a second. Cutting the two calibration runs is open work.
 - **People keep it on:** adoption, and how often teams disable a rule, once it is public.
 
 ## Risks we know about
