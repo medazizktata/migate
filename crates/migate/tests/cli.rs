@@ -241,7 +241,7 @@ fn mg004_an_older_migration_is_an_error_where_drizzle_would_skip_it() {
 }
 
 #[test]
-fn mg006_duplicate_versions_fail() {
+fn mg006_duplicate_versions_by_migrator() {
     let r = Repo::new();
     r.write("migrations/0001_init.sql", "CREATE TABLE a (id integer);\n");
     r.write(
@@ -253,9 +253,24 @@ fn mg006_duplicate_versions_fail() {
         "ALTER TABLE a ADD c integer;\n",
     );
     r.commit("base");
+    // Wrangler applies both (d1_migrations stores whole file names): a warning, not an error.
     let (code, out, _) = r.check("wrangler-d1");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("warning MG006"), "{out}");
+    // Rails refuses to run with two migrations of one version: an error.
+    let r = Repo::new();
+    r.write(
+        "db/migrate/20260101000000_a.rb",
+        "class A < ActiveRecord::Migration[8.1]; end\n",
+    );
+    r.write(
+        "db/migrate/20260101000000_b.rb",
+        "class B < ActiveRecord::Migration[8.1]; end\n",
+    );
+    r.commit("base");
+    let (code, out, _) = r.check("rails");
     assert_eq!(code, 2, "{out}");
-    assert!(out.contains("MG006"), "{out}");
+    assert!(out.contains("error   MG006"), "{out}");
 }
 
 #[test]

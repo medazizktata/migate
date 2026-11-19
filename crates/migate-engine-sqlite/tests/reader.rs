@@ -111,7 +111,11 @@ fn columns_keep_types_generation_collation_and_identity() {
         ("length(email) * 1.5", true)
     );
     let name = col("users", "name").data_type;
-    assert_eq!((name.family, name.length), (TypeFamily::Text, Some(80)));
+    // SQLite does not enforce declared sizes, so none is reported as a limit; the declaration stays in raw.
+    assert_eq!(
+        (name.family, name.length, name.raw.as_str()),
+        (TypeFamily::Text, None, "VARCHAR(80)")
+    );
     // A quoted column name with a comma, at the top level of the table body.
     assert_eq!(
         col("users", "odd, name").collation.as_deref(),
@@ -120,7 +124,7 @@ fn columns_keep_types_generation_collation_and_identity() {
     let price = col("users", "price").data_type;
     assert_eq!(
         (price.family, price.precision, price.scale),
-        (TypeFamily::Decimal, Some(10), Some(2))
+        (TypeFamily::Decimal, None, None)
     );
     assert_eq!(col("posts", "deleted").default.as_deref(), Some("0"));
     // A WITHOUT ROWID primary key cannot be NULL; an ordinary column can.
@@ -460,4 +464,21 @@ fn two_real_databases_diff_into_the_expected_rules() {
         ],
         "renumbered columns (bio moves up) and the new table's contents must not be findings"
     );
+}
+
+#[test]
+fn a_shorter_declared_length_is_not_narrowing_on_sqlite() {
+    use migate_core::diff::{classify, diff};
+    let base = build("CREATE TABLE t (id INTEGER PRIMARY KEY, name VARCHAR(20));")
+        .snapshot()
+        .unwrap();
+    let head = build("CREATE TABLE t (id INTEGER PRIMARY KEY, name VARCHAR(5));")
+        .snapshot()
+        .unwrap();
+    // SQLite stores 'a much longer name' in VARCHAR(5) unchanged, so the old app keeps working: not MG205.
+    let rules: Vec<&str> = classify(&diff(&base, &head))
+        .into_iter()
+        .map(|f| f.rule)
+        .collect();
+    assert_eq!(rules, ["MG206"]);
 }

@@ -684,7 +684,7 @@ fn trigger_shape(text: &str) -> (String, Vec<String>) {
     (timing, events)
 }
 
-/// A declared SQLite type: its text, SQLite's type affinity refined into a family, and its parameters.
+/// A declared SQLite type: its text, and SQLite's type affinity refined into a family.
 fn data_type(declared: &str) -> DataType {
     let up = declared.to_ascii_uppercase();
     let has = |s: &str| up.contains(s);
@@ -714,27 +714,13 @@ fn data_type(declared: &str) -> DataType {
     } else {
         TypeFamily::Decimal
     };
-    let params: Vec<u32> = declared
-        .split_once('(')
-        .map(|(_, p)| {
-            p.trim_end_matches(')')
-                .split(',')
-                .filter_map(|n| n.trim().parse().ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    let (length, precision, scale) = match (family, params.as_slice()) {
-        (TypeFamily::Text, [n]) => (Some(*n), None, None),
-        (TypeFamily::Decimal, [p]) => (None, Some(*p), None),
-        (TypeFamily::Decimal, [p, s]) => (None, Some(*p), Some(*s)),
-        _ => (None, None, None),
-    };
     DataType {
         raw: declared.to_string(),
         family,
-        length,
-        precision,
-        scale,
+        // SQLite enforces no declared size (sqlite.org/datatype3.html §3), so none is a limit here.
+        length: None,
+        precision: None,
+        scale: None,
     }
 }
 

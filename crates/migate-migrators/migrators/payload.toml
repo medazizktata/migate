@@ -6,6 +6,8 @@ path_pattern = '(?:^|/)migrations/(?P<id>(?P<version>\d{8}_\d{6})_[^/]+?)\.ts$'
 order = "timestamp-prefix"
 # Payload runs any file not in payload_migrations, in any order (docs/research/first-pass.md).
 out_of_order = "warn"
+# payload_migrations stores the whole name, so two files with one timestamp both apply.
+duplicate_versions = "warn"
 checksum = "none"
 
 [history]

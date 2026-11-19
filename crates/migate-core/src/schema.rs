@@ -82,6 +82,8 @@ pub struct DataType {
     /// The engine's own rendering, e.g. `character varying(200)` or `INTEGER`.
     pub raw: String,
     pub family: TypeFamily,
+    /// Size limits the engine enforces. `None` is unbounded, or declared but not enforced (SQLite ignores the size in
+    /// `VARCHAR(20)` or `DECIMAL(10,2)`; the declaration stays in `raw`). Narrowing rules read these.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

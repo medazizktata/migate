@@ -51,6 +51,7 @@
           "$ref": "#/$defs/TypeFamily"
         },
         "length": {
+          "description": "Size limits the engine enforces. `None` is unbounded, or declared but not enforced (SQLite ignores the size in\n`VARCHAR(20)` or `DECIMAL(10,2)`; the declaration stays in `raw`). Narrowing rules read these.",
           "type": [
             "integer",
             "null"

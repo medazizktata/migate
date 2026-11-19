@@ -97,6 +97,8 @@ struct Def {
     out_of_order: String,
     #[serde(default)]
     silent_skip: bool,
+    #[serde(default = "block")]
+    duplicate_versions: String,
     checksum: ChecksumName,
     history: History,
     migrate: Migrate,
@@ -114,6 +116,10 @@ pub struct Migrator {
     graph: Option<GraphKind>,
     policy: Policy,
     checksum: MigratorChecksum,
+}
+
+fn block() -> String {
+    "block".into()
 }
 
 impl Migrator {
@@ -138,17 +144,17 @@ impl Migrator {
                 d.id
             )));
         }
-        let out_of_order = match d.out_of_order.as_str() {
-            "block" => OutOfOrder::Block,
-            "warn" => OutOfOrder::Warn,
-            "allow" => OutOfOrder::Allow,
-            other => {
-                return Err(Error(format!(
-                    "{}: out_of_order must be block, warn or allow, not {other:?}",
-                    d.id
-                )));
-            }
+        let level = |field: &str, value: &str| match value {
+            "block" => Ok(OutOfOrder::Block),
+            "warn" => Ok(OutOfOrder::Warn),
+            "allow" => Ok(OutOfOrder::Allow),
+            other => Err(Error(format!(
+                "{}: {field} must be block, warn or allow, not {other:?}",
+                d.id
+            ))),
         };
+        let out_of_order = level("out_of_order", &d.out_of_order)?;
+        let duplicate_versions = level("duplicate_versions", &d.duplicate_versions)?;
         let model = match d.order {
             OrderName::Lexical => OrderModel::Lexical,
             OrderName::Numeric => OrderModel::Numeric,
@@ -168,6 +174,7 @@ impl Migrator {
                 model,
                 out_of_order,
                 silent_skip: d.silent_skip,
+                duplicate_versions,
             },
             checksum: match d.checksum {
                 ChecksumName::WholeFile => MigratorChecksum::WholeFile,
@@ -449,9 +456,10 @@ mod tests {
                 ("migrations/0002_b.sql", ""),
             ]))
             .unwrap();
+        // Wrangler applies both (whole file names in d1_migrations): a warning.
         assert_eq!(
             rules(&check(m.policy(), &dup, &[])),
-            vec![("MG006", Severity::Error)]
+            vec![("MG006", Severity::Warning)]
         );
     }
 

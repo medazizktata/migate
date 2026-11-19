@@ -5,6 +5,8 @@ path_pattern = '(?:^|/)migrations/(?P<id>(?P<version>\d{14})_[^/]+)/migration\.s
 order = "timestamp-prefix"
 # `migrate deploy` applies unapplied migrations; whether it refuses an older one is unverified, so warn.
 out_of_order = "warn"
+# _prisma_migrations stores the folder name, so two folders with one timestamp both apply.
+duplicate_versions = "warn"
 # Prisma stores a checksum but `migrate deploy` only warns on an edit (docs/research/validation.md).
 checksum = "none"
 

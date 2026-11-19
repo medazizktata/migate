@@ -72,11 +72,14 @@ pub struct Policy {
     pub out_of_order: OutOfOrder,
     /// The migrator never runs a migration older than its last applied one (stable Drizzle, golang-migrate).
     pub silent_skip: bool,
+    /// What two migrations with one version do: `Block` where the migrator refuses or skips the second (Rails, Drizzle),
+    /// `Warn` where it applies both by their full names (Wrangler D1, Payload, Prisma), their order then by name.
+    pub duplicate_versions: OutOfOrder,
 }
 
 /// `repo`: every migration in the pull request. `applied`: the versions production ran (`group/version` for graphs).
 pub fn check(policy: Policy, repo: &[Migration], applied: &[String]) -> Vec<Finding> {
-    let mut findings = duplicates(repo);
+    let mut findings = duplicates(policy.duplicate_versions, repo);
     match policy.model {
         OrderModel::Graph => findings.extend(graph(repo)),
         model => findings.extend(linear(policy, model, repo, applied)),
@@ -84,7 +87,12 @@ pub fn check(policy: Policy, repo: &[Migration], applied: &[String]) -> Vec<Find
     findings
 }
 
-fn duplicates(repo: &[Migration]) -> Vec<Finding> {
+fn duplicates(policy: OutOfOrder, repo: &[Migration]) -> Vec<Finding> {
+    let severity = match policy {
+        OutOfOrder::Block => Severity::Error,
+        OutOfOrder::Warn => Severity::Warning,
+        OutOfOrder::Allow => return Vec::new(),
+    };
     let mut by_key: BTreeMap<String, Vec<&str>> = BTreeMap::new();
     for m in repo {
         by_key.entry(m.key()).or_default().push(&m.id);
@@ -95,7 +103,7 @@ fn duplicates(repo: &[Migration]) -> Vec<Finding> {
         .map(|(key, ids)| {
             Finding::new(
                 "MG006",
-                Severity::Error,
+                severity,
                 key,
                 format!(
                     "several migrations share this version ({}): give each its own",
@@ -240,6 +248,7 @@ mod tests {
         model: OrderModel::TimestampPrefix,
         out_of_order: OutOfOrder::Warn,
         silent_skip: false,
+        duplicate_versions: OutOfOrder::Block,
     };
 
     #[test]
@@ -254,6 +263,7 @@ mod tests {
                 model,
                 out_of_order: OutOfOrder::Block,
                 silent_skip: true,
+                duplicate_versions: OutOfOrder::Block,
             };
             assert_eq!(
                 check(p, &lin(&["0001", "0002", "0003"]), &ran(&["0001", "0002"])),
@@ -283,6 +293,7 @@ mod tests {
             model: OrderModel::TimestampPrefix,
             out_of_order: OutOfOrder::Allow,
             silent_skip: true,
+            duplicate_versions: OutOfOrder::Block,
         };
         assert_eq!(
             rules(&check(p, &lin(&["200", "100"]), &ran(&["200"]))),
@@ -297,6 +308,7 @@ mod tests {
             model: OrderModel::SingleVersion,
             out_of_order: OutOfOrder::Warn,
             silent_skip: false,
+            duplicate_versions: OutOfOrder::Block,
         };
         assert_eq!(
             rules(&check(p, &lin(&["5", "3"]), &ran(&["5"]))),
@@ -311,6 +323,7 @@ mod tests {
             model: OrderModel::TimestampPrefix,
             out_of_order: OutOfOrder::Allow,
             silent_skip: false,
+            duplicate_versions: OutOfOrder::Block,
         };
         assert_eq!(check(p, &lin(&["200", "100"]), &ran(&["200"])), vec![]);
     }
@@ -321,6 +334,7 @@ mod tests {
             model: OrderModel::Numeric,
             out_of_order: OutOfOrder::Block,
             silent_skip: false,
+            duplicate_versions: OutOfOrder::Block,
         };
         // "10" > "9" numerically, so 10 pending after 9 is in order...
         assert_eq!(check(p, &lin(&["9", "10"]), &ran(&["9"])), vec![]);
@@ -381,6 +395,7 @@ mod tests {
         model: OrderModel::Graph,
         out_of_order: OutOfOrder::Block,
         silent_skip: false,
+        duplicate_versions: OutOfOrder::Block,
     };
 
     #[test]

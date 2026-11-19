@@ -5,6 +5,8 @@ path_pattern = '(?:^|/)migrations/(?P<id>(?P<version>\d+)_[^/]+\.sql)$'
 order = "numeric"
 # Wrangler applies any file not in d1_migrations, in any order (workers-sdk src/d1/migrations/helpers.ts).
 out_of_order = "warn"
+# d1_migrations stores the whole file name, so 0004_a.sql and 0004_b.sql both apply, in name order.
+duplicate_versions = "warn"
 checksum = "none"
 
 [history]
