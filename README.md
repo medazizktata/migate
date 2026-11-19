@@ -31,5 +31,6 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
 - Rust; Apache-2.0; pure open source, no revenue.
 
 ## Next
-- Two spikes test the riskiest assumptions before any Rust is written: whether real migrators (Payload, Prisma,
-  Django) run in the throwaway-database flow, and what the mixed-version test costs and catches.
+- Both de-risking spikes are done (`docs/research/spike-7.md`, `docs/research/spike-31.md`): real migrators run in the
+  throwaway-database flow, and the mixed-version test catches what a schema diff cannot (Rails needs the old version
+  booted before the migration). The first release's build tasks are next.

@@ -172,6 +172,20 @@ interface ReferenceRules {             // per ORM, data-driven where possible
 The core stays pure: `diff` and `classify` take snapshots, the results of the version runs and the reference answers as
 data, and return findings. A port exists only where there are two real implementations or a test double.
 
+**(revised after `spike-31.md`) How a version runner must work:**
+- **Two modes.** `fresh`: start the old version's suite against the migrated database (enough for Django and the Payload-on-D1 app).
+  `preboot`: boot the old version first, warm its schema cache, let migate migrate to head, then run its suite and the
+  rollback readback in that same process. Frameworks that cache the schema at boot (Rails) need `preboot`: a fresh run
+  missed both the GitHub August 2025 and the GitLab #5171 patterns, a pre-booted one caught both.
+- **Per-framework settings** (calibrated): Django `--keepdb` with `TEST.NAME`; Rails `DATABASE_URL`,
+  `PARALLEL_WORKERS=1`, `maintain_test_schema=false`; excluded tests that check the migration chain itself.
+- **A run is INVALID, never PASS,** when the test command did not exercise the migrated database (a stub command, or
+  the head migration record missing afterwards). INVALID maps to exit code 3, "could not check".
+- **Three layers, cheapest first:** the schema diff (sub-second), the model probe (load the old version's declared
+  models and select every column: 0.57 s on the Payload-on-D1 app; catches drops, renames, type changes), then the old version's
+  tests (about one integration-suite run: 113 s on the Payload-on-D1 app, seconds on small apps; catches write paths, raw SQL and the
+  schema-cache class).
+
 The sketches use TypeScript notation for readability only; they map one-to-one onto Rust traits or Go interfaces.
 
 **The subprocess protocol.** An executable `migration-guard-<kind>-<name>` on PATH. `--protocol` prints `1`, as in Buf
@@ -334,6 +348,7 @@ migrate.command = "npx payload migrate"
 | MG810 | a live version's tests fail against the migrated database | x | | | | revised; the primary check |
 | MG811 | a live version's queries fail against the migrated database | x | | | | revised; fallback when there are no tests |
 | MG812 | a live version cannot read rows the new version wrote | x | | | | revised; rollback compatibility |
+| MG813 | a live version's run was INVALID (it did not exercise the migrated database) | | | | | spike-31; exit code 3, unsuppressable |
 | MG820 | imported finding (Squawk or another linter) | | x | | | revised; level mapped from the source |
 | MG901 | marker without a reason, or matching nothing | | | | | hygiene |
 
@@ -550,9 +565,10 @@ migrators (Payload, Prisma, Rails) in a sandbox, statement capture, CI timings.
 ## 13. Open risks, ranked
 
 **(revised) Added by the review:**
-- **The mixed-version test's cost and reliability are unmeasured.** Running a live version's test suite against the
-  migrated database may be slow or flaky for small teams, and many projects have tests that do not touch the database.
-  Spike TASK-31 measures it on the Payload-on-D1 app and a Django sample.
+- **The mixed-version test's cost and reliability** were measured in `spike-31.md`: about one integration-suite run per
+  live version (113 s on the Payload-on-D1 app, 1-4 s on small apps), no flakiness in about 177 runs. What remains: a team needs
+  tests that write and read the affected tables (the Payload-on-D1 app' SQL-level suite alone missed a dropped column), and Rails
+  needs the pre-boot harness.
 - **Reference rules are per ORM and partial.** Rails and Prisma are understood; Django, Drizzle and Payload are not yet
   verified; raw SQL and query builders give "unknown", never "unused".
 - **Declaring every live version** needs the team to say which versions still serve traffic; a wrong list misses an

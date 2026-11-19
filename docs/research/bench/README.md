@@ -38,6 +38,14 @@ Cargo builds on this machine go through the `CARGO_TARGET_DIR` wrapper in `~/.zs
 
 The fetched third-party pages and raw API responses (about 23 MB) are not committed.
 
+## spike-31/ (the mixed-version test, `../spike-31.md`)
+
+- `harness/`: fixture builders (`make-*-fixtures.sh`), runners (`run_django.py`, `run_rails.py`, `run_payload_d1.py`), the Rails
+  pre-boot harness (`preboot_test.rb`), readbacks, the payload-d1 model probe and `schemadiff.py`. Set `SPIKE_DIR` to a work
+  folder first; the runners expect the sample repos and a Postgres there, as the fixture scripts create them.
+- `results.jsonl`: one line per run; `SPIKE_DIR=<dir> python3 harness/summarise.py [django|rails|payload-d1]` rebuilds the
+  tables (it reads `$SPIKE_DIR/results.jsonl`).
+
 ## spike-7/ (real migrators in the sandbox, `../spike-7.md`)
 
 - `flow.sh <repo> <base> <head> <outdir> <reset-cmd> <migrate-cmd> <snap-cmd>`: the two-checkout flow; prints the
