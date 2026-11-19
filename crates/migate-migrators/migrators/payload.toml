@@ -1,7 +1,8 @@
 id = "payload"
 name = "Payload"
 # Files: <migrations dir>/YYYYMMDD_HHMMSS_<name>.ts (index.ts is not a migration). The history table stores the stem.
-path_pattern = '(?:^|/)(?P<id>(?P<version>\d{8}_\d{6})_[^/]+?)\.ts$'
+# The folder must be named migrations (Payload's default, src/migrations): seed scripts use the same file names.
+path_pattern = '(?:^|/)migrations/(?P<id>(?P<version>\d{8}_\d{6})_[^/]+?)\.ts$'
 order = "timestamp-prefix"
 # Payload runs any file not in payload_migrations, in any order (docs/research/first-pass.md).
 out_of_order = "warn"

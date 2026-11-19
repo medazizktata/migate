@@ -6,8 +6,8 @@ migration that would break the running app is stopped before it ships. It also s
 production ran it, from running out of order or being silently skipped, and from disagreeing with production's own
 history.
 
-Status: early, not released. Works today on SQLite projects (Cloudflare D1 included); `docs/product.md` has what is
-built. (Earlier documents call it `migration-guard`, its working name.)
+Status: early, not released. Works today on SQLite projects; Cloudflare D1's local mode runs but needs the database
+file named by hand in `[sandbox] database`. `docs/product.md` marks what is built and what is planned. (Earlier documents call it `migration-guard`, its working name.)
 Licence: Apache-2.0 (`LICENSE`). Start here:
 
 - `docs/product.md`: the product: the problem, who it is for, what it does, what it is not, and where it stands.
@@ -41,7 +41,9 @@ base = "origin/main"
 [sandbox]
 env = { DATABASE_URL = "file:{db}" }   # the variable your project reads; {db} is the throwaway database's path
 setup = "npm ci"                       # run in each checkout first
-test = "npm test"                      # the base version's tests
+seed = "npm run seed"                  # optional: rows, so a migration that loses them is caught
+test = "npm test"                      # the base version's tests: run on base's own database, at head, and on an
+                                       # emptied copy, so a run that never used the database is "not checked"
 ```
 
 Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--format sarif` for machines.

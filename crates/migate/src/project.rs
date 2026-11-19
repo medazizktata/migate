@@ -1,4 +1,7 @@
-//! Reading a project's migration files from disk (an adapter: the core never touches the file system).
+//! Reading a project's migration files (an adapter: the core never touches the file system).
+//!
+//! The candidates are git's files (tracked, plus new ones not yet added), not a walk of the disk: an untracked folder
+//! such as a virtualenv holds migrations that a CI checkout never has (test drive 1, `docs/research/test-drive-1.md`).
 
 use std::fs;
 use std::path::Path;
@@ -7,7 +10,7 @@ use migate_core::ledger::MigrationFile;
 use migate_core::order::Migration;
 use migate_migrators::Migrator;
 
-/// Directories that never hold migrations and can be huge.
+/// Directories that never hold the project's own migrations, even when git does not ignore them.
 const SKIP: &[&str] = &[
     ".git",
     "node_modules",
@@ -30,8 +33,11 @@ pub struct Project {
 }
 
 pub fn read(root: &Path, migrator: &Migrator) -> Result<Project, String> {
-    let mut matched = Vec::new();
-    walk(root, root, migrator, &mut matched)?;
+    let mut matched: Vec<String> = git_files(root)?
+        .into_iter()
+        .filter(|rel| !rel.split('/').any(|part| SKIP.contains(&part)))
+        .filter(|rel| migrator.matches(rel) && root.join(rel).is_file())
+        .collect();
     matched.sort();
     let inputs: Vec<(String, String)> = matched
         .iter()
@@ -59,30 +65,30 @@ pub fn read(root: &Path, migrator: &Migrator) -> Result<Project, String> {
     })
 }
 
-fn walk(root: &Path, dir: &Path, migrator: &Migrator, out: &mut Vec<String>) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
-        let path = entry.path();
-        let kind = entry
-            .file_type()
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        if kind.is_dir() {
-            if !SKIP.contains(&entry.file_name().to_string_lossy().as_ref()) {
-                walk(root, &path, migrator, out)?;
-            }
-        } else if kind.is_file() {
-            let rel = path
-                .strip_prefix(root)
-                .map_err(|e| e.to_string())?
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/");
-            if migrator.matches(&rel) {
-                out.push(rel);
-            }
-        }
+/// Paths relative to `root`: tracked files, and untracked ones git does not ignore.
+fn git_files(root: &Path) -> Result<Vec<String>, String> {
+    let out = crate::git::git(
+        root,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--deduplicate",
+            "--",
+            ".",
+        ],
+    )?;
+    if !out.status.success() {
+        return Err(format!(
+            "cannot list the project's files with git (migate needs a git repository): {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
-    Ok(())
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect())
 }

@@ -4,9 +4,9 @@
 live against the database your new migrations produce, and stops the release if the old app would break.** It works with
 the migration tool, database and hosting you already use.
 
-Status (2026-11-19): designed, validated and partly built. The rules for the migration record and migration order exist
-and are tested; the command that runs them on a real project, the database engines and the old-app test are next (see
-"Where it stands" at the end). This page describes the product being built, not one you can install yet.
+Status (2026-11-19): partly built, not released. Built and tested on SQLite: the migration record and order checks, the
+throwaway-database run, the old app's tests against the new schema, the schema comparison and lost-row counts. Each
+capability below is marked **built** or **planned**; "Where it stands" at the end has the detail.
 
 ## The problem
 
@@ -57,16 +57,20 @@ serving traffic, and does it match what production actually ran?**
 **On every pull request, in CI (no production access):**
 1. **Old app, new schema.** migate builds a throwaway database, runs your own migrate command to the pull request's
    version, then runs the still-live version's tests (or loads its models and runs its queries) against it. If the old
-   app breaks, the gate fails, and the pull request comment says which test and which change.
+   app breaks, the gate fails, and the pull request comment says which test and which change. *Built for SQLite, with
+   the tests (not yet the models-and-queries fallback); the tests are first run on the old version's own database and on
+   one with its tables dropped, so a run that never touched the database is reported as "not checked". Planned: the
+   pull request comment (today the end of the test output is shown) and the pre-boot mode Rails needs.*
 2. **A fast schema check.** It compares the schema before and after and names risky changes: dropped or renamed columns,
    NOT NULL without a default, narrowed types, new constraints or triggers. For a dropped column it checks whether any
    live version still uses it, using each framework's own rules (in Rails, a column is in use unless it is listed in
-   `ignored_columns`).
+   `ignored_columns`). *Built: the comparison and its rules. Planned: the live-use check for dropped columns.*
 3. **The migration record.** It keeps a hash of every migration production has run. Editing or deleting one fails the
-   gate; so does quietly rewriting the record. A comment-only edit is told apart from a real one.
+   gate; so does quietly rewriting the record. A comment-only edit is told apart from a real one. *Built.*
 4. **Order.** A migration merged from an old branch is flagged, as an error where your tool would silently skip it.
+   *Built.*
 
-**At release (with a read-only production credential):**
+**At release (with a read-only production credential), all planned:**
 5. **Does production match the repository?** It reads your tool's own history table and stops on any difference.
 6. **Will it fail on real data?** For each risky change it asks production one bounded, read-only question: how many rows
    would violate the new NOT NULL, are there duplicates for the new UNIQUE, is the index you are dropping still used.
@@ -76,7 +80,8 @@ serving traffic, and does it match what production actually ran?**
 
 **When a breaking change is intended,** you mark it as the "contract" step of an expand/contract change, naming the
 object and giving a reason. The override is listed in the pull request comment for a human to see, and it can never
-cover a column that a live version still uses.
+cover a column that a live version still uses. *Planned; until then an intended breaking change fails the gate with no
+way to accept it.*
 
 An illustrative pull request comment (the format is not built yet):
 
@@ -116,11 +121,11 @@ Size matters in three places, and migate handles each without copying production
 |---|---|---|
 | Will the migration fail on existing rows (NOT NULL on a column with NULLs, UNIQUE with duplicates)? | Counting violations means scanning big tables | Bounded, time-limited, read-only queries at release; statistics before scans (Postgres keeps a NULL fraction per column), sampling, or a read replica. A timeout reports "not checked", never "fine". |
 | Will it lock the table or run for hours? | Locks and rewrites grow with table size | The catalog's row estimate (no scan) turns a risky change on a big table from a warning into an error; migrations must set a lock timeout; lock findings from Squawk are imported. Running big changes online is the job of tools like gh-ost, pt-online-schema-change or pgroll. |
-| Will it lose or corrupt data (backfills, table rebuilds)? | A full copy for a rehearsal is impractical at terabytes | The rehearsal stays optional and uses a copy-on-write clone (a Neon branch, an Aurora clone, a filesystem snapshot) or a sampled subset. Without one, data-changing statements are flagged for human review, never passed. |
+| Will it lose or corrupt data (backfills, table rebuilds)? | A full copy for a rehearsal is impractical at terabytes | The rehearsal stays optional and uses a copy-on-write clone (a Neon branch, an Aurora clone, a filesystem snapshot) or a sampled subset. Without one, data-changing statements are to be flagged for human review (planned). Built today: row counts before and after the migrations on the throwaway database, holding what a `seed` command and the old tests wrote, catch rows a migration deletes (a cascade-deleting table rebuild included). |
 
 **One trap migate refuses to fall into:** a backfill (`UPDATE ... SET ...`) is instant on an empty throwaway database and
-can take hours in production. "It ran fast in the sandbox" is never read as safe; data-changing statements are weighed
-against production's row estimates. Projects with many databases (one per tenant) get the read-only checks per database,
+can take hours in production. "It ran fast in the sandbox" is never read as safe; data-changing statements are to be
+weighed against production's row estimates (planned). Projects with many databases (one per tenant) get the read-only checks per database,
 within a time budget.
 
 Not yet measured: all tests so far used small schemas and little data. A spike on tables with tens of millions of rows is
@@ -202,6 +207,8 @@ planned before large-database support is claimed.
 | The SQLite schema reader (and a throwaway SQLite database), producing the shared schema model | built and tested; several database files and deferrable foreign keys included |
 | The schema diff and 23 breaking-change rules (drops, NOT NULL, narrowing, defaults, constraints, views, triggers, enums) | built and tested in the core |
 | `migate check` with `[sandbox]`: migrate a throwaway SQLite database at base and HEAD, diff, run the base version's tests | built and tested (fresh mode; Rails needs the pre-boot mode, not built) |
+| Test runs proven to use the database (MG813); rows lost by the migrations (MG105) | built and tested |
+| A blind test drive on real Django, Rails, Drizzle, Prisma and D1 projects | done (`research/test-drive-1.md`); its findings are being fixed |
 | The Postgres reader, the pre-boot runner, production checks, PR comment | planned (backlog) |
 | First public release | not yet |
 

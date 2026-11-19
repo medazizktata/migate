@@ -748,3 +748,50 @@ ALTER TABLE users_new RENAME TO users;";
         "{out}"
     );
 }
+
+#[test]
+fn migrations_come_from_git_not_from_ignored_folders() {
+    let r = Repo::new();
+    r.write(".gitignore", "env/\n");
+    r.write("migrations/0001_init.sql", "CREATE TABLE a (id INTEGER);");
+    // A virtualenv's packages ship their own migrations; a CI checkout never has them.
+    r.write(
+        "env/lib/site-packages/pkg/migrations/0002_pkg.sql",
+        "CREATE TABLE b (id INTEGER);",
+    );
+    r.commit("init");
+    // A new migration, not yet added to git, is the project's own and is listed.
+    r.write("migrations/0003_new.sql", "CREATE TABLE c (id INTEGER);");
+    let out = r.record("wrangler-d1", &["--all"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.contains("0001_init.sql") && text.contains("0003_new.sql"),
+        "{text}"
+    );
+    assert!(!text.contains("0002_pkg.sql"), "{text}");
+}
+
+#[test]
+fn payload_seed_files_are_not_migrations() {
+    let r = Repo::new();
+    r.write(
+        "src/migrations/20240101_000000_init.ts",
+        "export async function up() {}\n",
+    );
+    r.write(
+        "src/seed/20240101_000000_demo_data.ts",
+        "export const demo = [];\n",
+    );
+    r.commit("init");
+    let out = r.record("payload", &["--all"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("20240101_000000_init") && !text.contains("demo_data"),
+        "{text}"
+    );
+}
