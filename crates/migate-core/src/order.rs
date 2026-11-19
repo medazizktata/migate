@@ -350,6 +350,25 @@ mod tests {
     }
 
     #[test]
+    fn a_migration_recorded_by_its_full_name_is_never_late() {
+        let a = Migration::linear("20240101_000000_a", "20240101_000000");
+        let b = Migration::linear("20240102_000000_b", "20240102_000000");
+        assert_eq!(
+            check(WARN, &[a.clone(), b.clone()], &ran(&[&a.id, &b.id])),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn the_digits_after_an_underscore_are_part_of_the_version() {
+        let late = Migration::linear("20240101_000000_a", "20240101_000000");
+        assert_eq!(
+            rules(&check(WARN, &[late], &ran(&["20240101_120000"]))),
+            vec![("MG004", Severity::Warning)]
+        );
+    }
+
+    #[test]
     fn applied_may_be_full_names_and_trailing_digits_do_not_count() {
         // Payload stores the file stem; the `2` in `v2` must not join the timestamp.
         let repo = vec![

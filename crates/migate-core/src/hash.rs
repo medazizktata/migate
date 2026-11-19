@@ -211,6 +211,76 @@ fn string_end(c: &[char], i: usize, lang: Lang) -> Option<usize> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn every_string_form_keeps_its_comment_markers_and_ends_where_it_ends() {
+        // Each case: a string holding comment-like text, then a real comment. The string survives whole, the comment
+        // goes; a wrong string end would either eat the comment into code or cut the string into a "comment".
+        let cases = [
+            (
+                Lang::Sql,
+                r##"SELECT 'it''s -- x' -- c"##,
+                r##"SELECT 'it''s -- x'"##,
+            ),
+            (
+                Lang::Sql,
+                r##"SELECT "a -- b" -- c"##,
+                r##"SELECT "a -- b""##,
+            ),
+            (
+                Lang::Sql,
+                r##"SELECT $$ -- x $$ -- c"##,
+                r##"SELECT $$ -- x $$"##,
+            ),
+            // Each case below ends a string or comment right before a comment marker, where a wrong end shows.
+            (Lang::Sql, r##"SELECT /*/ x */ 1"##, r##"SELECT 1"##),
+            (Lang::Sql, r##"SELECT '' -- c"##, r##"SELECT ''"##),
+            (Lang::Sql, r##"SELECT /* a*b/c */ 1"##, r##"SELECT 1"##),
+            (Lang::Sql, r##"SELECT $1$ -- c"##, r##"SELECT $1$"##),
+            (Lang::Sql, r##"SELECT $a -- c"##, r##"SELECT $a"##),
+            (
+                Lang::Sql,
+                r##"SELECT $$$ x $$ -- c"##,
+                r##"SELECT $$$ x $$"##,
+            ),
+            (
+                Lang::Sql,
+                r##"SELECT $$ open -- c"##,
+                r##"SELECT $$ open -- c"##,
+            ),
+            (
+                Lang::Hash,
+                r##"x = """a " # b""" # c"##,
+                r##"x = """a " # b""""##,
+            ),
+            (Lang::Hash, r##"x = """open # c"##, r##"x = """open # c"##),
+            (Lang::Hash, r##"x = 'a\\' # c"##, r##"x = 'a\\'"##),
+            (Lang::CLike, r##"f("a\\") // c"##, r##"f("a\\")"##),
+            (
+                Lang::Sql,
+                r##"SELECT $fn$ /* x */ $fn$ -- c"##,
+                r##"SELECT $fn$ /* x */ $fn$"##,
+            ),
+            (Lang::Sql, r##"SELECT $1 -- c"##, r##"SELECT $1"##),
+            (
+                Lang::Sql,
+                r##"SELECT 'open -- x"##,
+                r##"SELECT 'open -- x"##,
+            ),
+            (
+                Lang::Hash,
+                r##"x = """# a \""" # b""" # c"##,
+                r##"x = """# a \""" # b""""##,
+            ),
+            (Lang::Hash, r##"x = '''# a''' # c"##, r##"x = '''# a'''"##),
+            (Lang::Hash, r##"x = 'a\' # b' # c"##, r##"x = 'a\' # b'"##),
+            (Lang::CLike, r##"f(`// a`) // c"##, r##"f(`// a`)"##),
+            (Lang::CLike, r##"f("a\" // b") // c"##, r##"f("a\" // b")"##),
+        ];
+        for (lang, text, code) in cases {
+            assert_eq!(code_only(text, lang), code, "{text}");
+        }
+    }
+
     fn same_code(a: &str, b: &str, lang: Lang) -> bool {
         digests(a.as_bytes(), lang).code_sha256 == digests(b.as_bytes(), lang).code_sha256
     }

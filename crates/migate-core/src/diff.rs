@@ -940,6 +940,66 @@ mod tests {
     }
 
     #[test]
+    fn a_column_change_raises_only_its_own_rule() {
+        let mut collated = column("a", 1, text(), true, Some("'x'"));
+        if let Detail::Column(c) = &mut collated.detail {
+            c.collation = Some("NOCASE".into());
+        }
+        assert_eq!(
+            rules_between(base_objects(), with(base_objects(), collated)),
+            ["MG206"]
+        );
+    }
+
+    #[test]
+    fn an_object_named_like_a_table_does_not_hide_that_tables_changes() {
+        // MySQL names indexes per table, so an index may share another table's name.
+        let mut base = base_objects();
+        base.extend([
+            top(
+                "u",
+                Detail::Table {
+                    strict: false,
+                    without_rowid: false,
+                },
+            ),
+            Object {
+                parent: Some("u".into()),
+                ..column("x", 0, text(), true, None)
+            },
+        ]);
+        let mut head = without(base.clone(), Kind::Column, "x");
+        head.push(on_t("u", index(false, &["a"])));
+        assert_eq!(rules_between(base, head), ["MG201"]);
+    }
+
+    #[test]
+    fn messages_name_what_changed() {
+        let b = snap(base_objects());
+        let dropped = classify(&diff(&b, &snap(without(base_objects(), Kind::Column, "a"))));
+        assert_eq!(dropped[0].message, "column dropped");
+        let unvalidated = on_t(
+            "t_check",
+            Detail::Check {
+                expression: "a <> ''".into(),
+                validated: false,
+            },
+        );
+        let validated = on_t(
+            "t_check",
+            Detail::Check {
+                expression: "a <> ''".into(),
+                validated: true,
+            },
+        );
+        let f = classify(&diff(
+            &snap(with(base_objects(), unvalidated)),
+            &snap(with(base_objects(), validated)),
+        ));
+        assert_eq!(f[0].message, "CHECK now validated");
+    }
+
+    #[test]
     fn severities_follow_the_axes() {
         let b = snap(base_objects());
         let h = snap(without(base_objects(), Kind::Column, "a"));

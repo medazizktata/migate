@@ -174,6 +174,30 @@ mod tests {
     }
 
     #[test]
+    fn a_marker_on_a_note_is_stale_and_says_why_when_it_has_no_reason() {
+        // A note needs no acceptance, so a marker aimed at one accepts nothing.
+        let added = Finding::new(
+            "MG210",
+            Severity::Note,
+            "main.users.nickname",
+            "column added",
+        );
+        let (markers, _) = parse(
+            "m.sql",
+            "-- migate: contract add-column users.nickname -- why",
+        );
+        assert_eq!(
+            rules(&apply(vec![added], &markers)),
+            [("MG210", Severity::Note), ("MG901", Severity::Error)]
+        );
+        let (_, bad) = parse("m.sql", "-- migate: contract drop-column users.legacy");
+        assert_eq!(
+            bad[0].message,
+            "contract marker has no reason: write one after ` -- `"
+        );
+    }
+
+    #[test]
     fn a_stale_marker_is_mg901_and_leaves_other_findings_alone() {
         let (markers, _) = parse(
             "m.sql",

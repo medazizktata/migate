@@ -364,14 +364,6 @@ impl Snapshot {
         &self.engine
     }
 
-    pub fn engine_version(&self) -> Option<&str> {
-        self.engine_version.as_deref()
-    }
-
-    pub fn capabilities(&self) -> &BTreeSet<Kind> {
-        &self.capabilities
-    }
-
     /// Whether the reader could see this kind. A kind it cannot see is "not checked", never "none".
     pub fn sees(&self, kind: Kind) -> bool {
         self.capabilities.contains(&kind)
