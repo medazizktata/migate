@@ -11,6 +11,7 @@ mod git;
 mod ledger_file;
 mod output;
 mod project;
+mod sandbox;
 
 /// Exit codes: 0 clean (warnings and notes allowed), 2 errors found, 3 could not check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

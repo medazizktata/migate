@@ -6,7 +6,8 @@ migration that would break the running app is stopped before it ships. It also s
 production ran it, from running out of order or being silently skipped, and from disagreeing with production's own
 history.
 
-Status: research and decisions done, nothing built yet. (Earlier documents call it `migration-guard`, its working name.)
+Status: early, not released. Works today on SQLite projects (Cloudflare D1 included); `docs/product.md` has what is
+built. (Earlier documents call it `migration-guard`, its working name.)
 Licence: Apache-2.0 (`LICENSE`). Start here:
 
 - `docs/product.md`: the product: the problem, who it is for, what it does, what it is not, and where it stands.
@@ -20,6 +21,30 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
 - `docs/research/first-pass.md`: the first round (landscape, 21 migrators' history tables), with corrections at the top.
 - `docs/transcript.md`: the conversation this project came from, with the first round's research reports in full.
 - `docs/prior-art/the Payload-on-D1 app/`: the single-repo version it grew out of (the Payload-on-D1 app, Payload on Cloudflare D1), with its ADR.
+
+## Use
+
+```sh
+cargo build --release            # the binary is target/release/migate (or under $CARGO_TARGET_DIR)
+migate check --migrator drizzle --base origin/main
+migate ledger record <migration-id>   # after production ran it
+```
+
+`migate check` always checks the migration files against the ledger and the order rules (no database needed). With a
+`[sandbox]` section in `migate.toml` it also migrates a throwaway SQLite database at the base branch and at HEAD, reports
+breaking schema changes, and runs the base version's tests against the migrated database:
+
+```toml
+migrator = "drizzle"
+base = "origin/main"
+
+[sandbox]
+env = { DATABASE_URL = "file:{db}" }   # the variable your project reads; {db} is the throwaway database's path
+setup = "npm ci"                       # run in each checkout first
+test = "npm test"                      # the base version's tests
+```
+
+Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--format sarif` for machines.
 
 ## Direction (the owner's, 2026-11-19)
 - The goal is any database and any host, reached through the architecture: the ledger and production-history layers

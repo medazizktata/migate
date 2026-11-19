@@ -60,6 +60,7 @@ struct Settings {
     root: PathBuf,
     ledger: String,
     base: String,
+    sandbox: Option<config::Sandbox>,
 }
 
 fn settings(c: &Common, base_flag: Option<&String>) -> Result<Settings, String> {
@@ -81,6 +82,7 @@ fn settings(c: &Common, base_flag: Option<&String>) -> Result<Settings, String> 
             .cloned()
             .or(file.base)
             .unwrap_or_else(|| "origin/main".into()),
+        sandbox: file.sandbox,
     })
 }
 
@@ -164,6 +166,9 @@ fn run_check(s: &Settings) -> Result<Checked, String> {
         &applied,
     ));
 
+    if let Some(cfg) = &s.sandbox {
+        findings.extend(crate::sandbox::run(cfg, &s.migrator, &s.root, &s.base)?);
+    }
     let files = project
         .files
         .iter()

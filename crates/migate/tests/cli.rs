@@ -460,3 +460,197 @@ fn record_all_adopts_every_migration_and_conflicts_with_ids() {
         "--all with ids is a usage error"
     );
 }
+
+// The sandbox run, on a project shaped like Wrangler D1 whose migrate command is a small Python script (Python's
+// standard sqlite3 module, present on CI runners): it applies migrations/*.sql not yet in d1_migrations, statement by
+// statement with no transaction around a file, like D1.
+const APPLY: &str = r#"import os, pathlib, sqlite3, sys
+if "DATABASE_URL" in os.environ:
+    sys.exit("DATABASE_URL leaked into the sandbox: " + os.environ["DATABASE_URL"])
+con = sqlite3.connect(os.environ.get("D1_PATH", "local.db"), isolation_level=None)
+con.execute("CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY, name TEXT UNIQUE)")
+done = {r[0] for r in con.execute("SELECT name FROM d1_migrations")}
+for f in sorted(pathlib.Path("migrations").glob("*.sql")):
+    if f.name not in done:
+        con.executescript(f.read_text())
+        con.execute("INSERT INTO d1_migrations (name) VALUES (?)", (f.name,))
+"#;
+
+/// The base version's "tests": the queries its code runs.
+const OLD_APP: &str = r#"import os, sqlite3
+con = sqlite3.connect(os.environ["D1_PATH"])
+con.execute("INSERT INTO users (email, legacy) VALUES ('a@b.c', 'x')")
+print(con.execute("SELECT id, email, legacy FROM users").fetchall())
+"#;
+
+const SANDBOX_TOML: &str = r#"migrator = "wrangler-d1"
+base = "main"
+[sandbox]
+migrate = "python3 apply.py"
+env = { D1_PATH = "{db}" }
+test = "python3 old_app.py"
+"#;
+
+/// A repo on `main` with one migration, then a `pr` branch adding `second` as migration 0002.
+fn sandbox_repo(config: &str, second: &str) -> Repo {
+    sandbox_repo_with(config, OLD_APP, second)
+}
+
+fn sandbox_repo_with(config: &str, old_app: &str, second: &str) -> Repo {
+    let r = Repo::new();
+    r.write("migate.toml", config);
+    r.write("apply.py", APPLY);
+    r.write("old_app.py", old_app);
+    r.write(
+        "migrations/0001_init.sql",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);",
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write("migrations/0002_change.sql", second);
+    r.commit("change");
+    r
+}
+
+fn sandbox_check(r: &Repo, env: &[(&str, &str)]) -> (i32, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .envs(env.iter().copied())
+        .args(["check"])
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn sandbox_catches_a_dropped_column_the_old_version_reads() {
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users DROP COLUMN legacy;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG201") && out.contains("main.users.legacy"),
+        "{out}"
+    );
+    assert!(
+        out.contains("MG810") && out.contains("no column named legacy"),
+        "{out}"
+    );
+}
+
+#[test]
+fn sandbox_passes_a_safe_addition_and_never_passes_a_connection_url_through() {
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(
+        &r,
+        &[("DATABASE_URL", "postgres://production.example.invalid/db")],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("MG210") && !out.contains("MG810"), "{out}");
+}
+
+#[test]
+fn sandbox_reports_a_failed_head_migration_and_what_it_left_behind() {
+    let r = sandbox_repo(
+        SANDBOX_TOML,
+        "ALTER TABLE users ADD COLUMN nickname TEXT;\nALTER TABLE missing ADD COLUMN x TEXT;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG803") && out.contains("no such table: missing"),
+        "{out}"
+    );
+    assert!(
+        out.contains("MG210") && out.contains("main.users.nickname"),
+        "left behind: {out}"
+    );
+}
+
+#[test]
+fn sandbox_refuses_to_pass_when_the_migrations_went_to_another_database() {
+    // The project reads D1_PATH; this config sets another name, so the script writes to its default file instead.
+    let misnamed = SANDBOX_TOML.replace("D1_PATH = ", "DB_PATH = ");
+    let r = sandbox_repo(&misnamed, "ALTER TABLE users DROP COLUMN legacy;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(err.contains("MG804"), "{err}");
+}
+
+#[test]
+fn sandbox_without_tests_says_only_the_diff_judged() {
+    let no_test = SANDBOX_TOML.replace("test = \"python3 old_app.py\"\n", "");
+    let r = sandbox_repo(&no_test, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("MG810") && out.contains("only the schema diff judged"),
+        "{out}"
+    );
+}
+
+#[test]
+fn sandbox_refuses_a_database_with_no_migration_history() {
+    // Writes the right file but records nothing, as a migrate command pointed at the wrong history table would.
+    let config = SANDBOX_TOML.replace(
+        "migrate = \"python3 apply.py\"",
+        "migrate = \"python3 -c 'import os, sqlite3; sqlite3.connect(os.environ[\\\"D1_PATH\\\"]).execute(\\\"CREATE TABLE d1_migrations (name TEXT)\\\")'\"",
+    );
+    let r = sandbox_repo(&config, "ALTER TABLE users DROP COLUMN legacy;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("MG804") && err.contains("history is empty"),
+        "{err}"
+    );
+}
+
+#[test]
+fn sandbox_leaves_no_worktree_behind() {
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    let list = Command::new("git")
+        .arg("-C")
+        .arg(&r.dir)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .unwrap();
+    let count = String::from_utf8_lossy(&list.stdout)
+        .matches("worktree ")
+        .count();
+    assert_eq!(count, 1, "{}", String::from_utf8_lossy(&list.stdout));
+}
+
+#[test]
+fn sandbox_catches_an_added_column_that_breaks_the_old_versions_own_sql() {
+    // GitLab #5171: a nullable column added; the schema diff sees only a note, the old version's `SELECT *` breaks.
+    let old_app = r#"import os, sqlite3
+con = sqlite3.connect(os.environ["D1_PATH"])
+print(con.execute("SELECT * FROM users UNION ALL SELECT id, email, legacy FROM users").fetchall())
+"#;
+    let r = sandbox_repo_with(
+        SANDBOX_TOML,
+        old_app,
+        "ALTER TABLE users ADD COLUMN nickname TEXT;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("MG210") && out.contains("MG810"), "{out}");
+    assert!(out.contains("same number of result columns"), "{out}");
+}
+
+#[test]
+fn sandbox_works_from_inside_a_git_hook() {
+    // Git sets these for hooks; migate's own git calls must not follow them to another repository.
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let env = [
+        ("GIT_INDEX_FILE", ".git/index"),
+        ("GIT_DIR", "/nonexistent/.git"),
+    ];
+    let (code, out, err) = sandbox_check(&r, &env);
+    assert_eq!(code, 0, "{out}{err}");
+}

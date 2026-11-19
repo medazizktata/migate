@@ -39,9 +39,24 @@ pub fn file_at_base(root: &Path, base: &str, rel: &str) -> Result<AtBase, String
     ))
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    Command::new("git")
-        .arg("-C")
+/// Variables that point git at another repository. Git sets some of them for hooks, so `migate check` run from a hook
+/// would otherwise act on the hook's repository (or fail: `.git/index` is not a path inside a worktree).
+const RELOCATING: [&str; 7] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_PREFIX",
+];
+
+pub fn git(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let mut cmd = Command::new("git");
+    for v in RELOCATING {
+        cmd.env_remove(v);
+    }
+    cmd.arg("-C")
         .arg(root)
         .args(args)
         .output()

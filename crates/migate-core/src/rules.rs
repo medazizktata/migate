@@ -209,6 +209,24 @@ pub const RULES: &[Rule] = &[
         description: "A sequence was dropped. The running app may still take values from it.",
         axes: "B",
     },
+    Rule {
+        id: "MG803",
+        name: "head-migration-failed",
+        description: "The pull request's migrations fail on a database migrated to the base branch. Deploying fails, and a tool without transactions leaves the changes made so far behind.",
+        axes: "D",
+    },
+    Rule {
+        id: "MG804",
+        name: "sandbox-not-migrated",
+        description: "The base migrations did not write to the throwaway database, so nothing was checked. Usually the configured variable is not the one the project reads.",
+        axes: "",
+    },
+    Rule {
+        id: "MG810",
+        name: "old-version-tests-fail",
+        description: "The base version's tests fail against the migrated database. The version still running in production would break when this deploys.",
+        axes: "B",
+    },
 ];
 
 /// The catalogue entry for a rule ID.

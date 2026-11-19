@@ -4,8 +4,15 @@
 //! migrator = "payload"
 //! ledger = "db/migate-ledger.json"            # relative to the project directory
 //! base = "origin/main"
+//!
+//! # Optional: migrate a throwaway SQLite database at base and at head, diff the schemas, run the base version's tests.
+//! [sandbox]
+//! env = { DATABASE_URL = "sqlite:///{db}" }   # how the project is told where the database is; {db} is its path
+//! setup = "npm ci"                             # run in each checkout first (a fresh checkout has no dependencies)
+//! test = "npm test"                            # the base version's tests, run against the migrated database
 //! ```
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -18,6 +25,27 @@ pub struct Config {
     pub migrator: Option<String>,
     pub ledger: Option<String>,
     pub base: Option<String>,
+    pub sandbox: Option<Sandbox>,
+}
+
+/// `[sandbox]`. In commands and values, `{db}` is the throwaway database's path and `{dir}` the folder holding it.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sandbox {
+    /// Variables for every command, on top of the migrator's own.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Names of variables to pass through from migate's own environment. Nothing else is passed, except the
+    /// toolchain's (PATH, HOME, language managers): an inherited connection URL could point at production.
+    #[serde(default)]
+    pub pass_env: Vec<String>,
+    /// Where the migrate command writes the database, when the tool picks the file name itself; a `*` in the file name
+    /// matches one file. Default: `{db}`.
+    pub database: Option<String>,
+    /// Replaces the migrator's migrate command.
+    pub migrate: Option<String>,
+    pub setup: Option<String>,
+    pub test: Option<String>,
 }
 
 /// `explicit` is `--config`; without it, `<root>/migate.toml` is read if present.

@@ -80,6 +80,26 @@ pub fn snapshot_files(files: &[(&str, &Path)]) -> Result<Snapshot, Error> {
     if files.is_empty() {
         return Err(Error("no database files given".into()));
     }
+    let copy = copy_of(files)?;
+    let names: Vec<&str> = files.iter().map(|(ns, _)| *ns).collect();
+    read_namespaces(&copy, &names)
+}
+
+/// How many rows `sql` returns on the database at `path`, read through the same read-only copy as [`snapshot`].
+pub fn count_rows(path: &Path, sql: &str) -> Result<usize, Error> {
+    check_file(path)?;
+    let copy = copy_of(&[("main", path)])?;
+    let mut stmt = copy.prepare(sql)?;
+    let mut rows = stmt.query([])?;
+    let mut n = 0;
+    while rows.next()?.is_some() {
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// An in-memory copy of each file under its namespace, taken with SQLite's backup API from a read-only connection.
+fn copy_of(files: &[(&str, &Path)]) -> Result<Connection, Error> {
     let mut copy = Connection::open_in_memory()?;
     for (ns, path) in files {
         let source = Connection::open_with_flags(
@@ -95,8 +115,7 @@ pub fn snapshot_files(files: &[(&str, &Path)]) -> Result<Snapshot, Error> {
             None,
         )?;
     }
-    let names: Vec<&str> = files.iter().map(|(ns, _)| *ns).collect();
-    read_namespaces(&copy, &names)
+    Ok(copy)
 }
 
 fn check_file(path: &Path) -> Result<(), Error> {
