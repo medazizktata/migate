@@ -1,0 +1,11 @@
+# typos: spell-check code and docs (run by scripts/check.sh and CI).
+[default.extend-words]
+migate = "migate"   # the project's name, not a misspelling of "migrate"
+
+[files]
+extend-exclude = [
+  "docs/transcript.md",        # a recorded conversation: quoted text stays as it was
+  "docs/research/bench/**",    # recorded data and third-party output
+  "docs/prior-art/**",         # copied from the Payload-on-D1 app as it was
+  "Cargo.lock",
+]

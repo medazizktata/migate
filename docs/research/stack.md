@@ -50,7 +50,7 @@ launcher linked to 100 shared libraries (V, `otool -L`); official Node builds ma
 
 ### 1b. SQLite introspection of 100 tables (M)
 
-Schema from `gen_schema.py`: 100 tables, 200 indexes, 197 foreign keys, 100 CHECKs, 5 triggers, 5 views. Every program
+Schema from `gen_schema.py`: 100 tables, 200 indexes, 197 foreign keys, 100 CHECK constraints, 5 triggers, 5 views. Every program
 runs the same ~1,600 queries (`sqlite_schema`, `pragma_table_xinfo` on every table and view, `pragma_index_list`,
 `pragma_index_xinfo`, `pragma_foreign_key_list`) and printed the expected counts
 `{"objects":310,"tables":100,"views":5,"triggers":5,"columns":1306,"indexes":200,"indexColumns":500,"fks":197}`,

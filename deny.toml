@@ -1,0 +1,20 @@
+# cargo-deny: what third-party code may enter migate (run by scripts/check.sh and CI).
+
+[advisories]
+# RustSec advisories: a vulnerable or unmaintained dependency fails the check.
+yanked = "deny"
+
+[licenses]
+# Licences compatible with shipping migate under Apache-2.0. Add one only on purpose.
+allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# crates.io only: no git or alternative registries.
+unknown-registry = "deny"
+unknown-git = "deny"

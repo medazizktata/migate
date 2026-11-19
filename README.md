@@ -30,6 +30,15 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
   a GFS-dedicated feature only once it works for most databases.
 - Rust; Apache-2.0; pure open source, no revenue.
 
+## Development
+- `bash scripts/check.sh` runs every check, the same way CI does: rustfmt, clippy (lints and type checks, `-D warnings`),
+  rustdoc, tests, the core dependency rule, cargo-deny (advisories, licences, sources), shellcheck, actionlint and typos.
+  A missing tool fails the run; `MIGATE_ALLOW_MISSING=1` runs what is installed.
+- CI (`.github/workflows/ci.yml`) runs that script and checks the minimum Rust version (1.85); its actions are pinned to
+  commit SHAs.
+- Every rule migate enforces gets a case it must fail and one it must pass, and is shown failing by deliberate sabotage
+  before it is trusted.
+
 ## Next
 - Both de-risking spikes are done (`docs/research/spike-7.md`, `docs/research/spike-31.md`): real migrators run in the
   throwaway-database flow, and the mixed-version test catches what a schema diff cannot (Rails needs the old version
