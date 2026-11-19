@@ -30,7 +30,7 @@ the file system and the teams' own test commands are slow, varied and hard to fa
 | `migate-core` | the rules; pure functions; no I/O | yes |
 | `migate-migrators` | migration-tool definitions (TOML) and their interpreter | yes |
 | `migate` | CLI, composition root | yes (prints its version only) |
-| `migate-source` (name provisional) | project files and the git base lookup | with TASK-37 |
+| (in `migate`: `project.rs`, `git.rs`, `ledger_file.rs`) | project files, the git base lookup, the ledger file | done in TASK-37; a separate crate when a second consumer needs it |
 | `migate-engine-sqlite`, `migate-engine-postgres`, later MySQL and SQL Server | schema reader, transport, sandbox per engine | with TASK-16, TASK-17 |
 | `migate-runner` | the mixed-version runner (fresh and pre-boot modes) | with TASK-32 |
 | `migate-host-*` | production history, read-only checks, restore points | with TASK-21, TASK-22 |
@@ -51,7 +51,7 @@ The workspace lints add `unsafe_code = "forbid"` and refuse `unwrap()` outside t
 
 | Port | Arrives with | Its two sides |
 |---|---|---|
-| project source: migration files, the ledger file, the base branch's copy | TASK-37 (`migate check`) | real files and git; an in-memory double for tests |
+| project source: migration files, the ledger file, the base branch's copy | TASK-37 (`migate check`) | **no trait yet**: the core takes plain data, and the end-to-end tests build real temporary git repositories, so no double was needed. A trait comes when a second source does (for example reading a remote repository). |
 | transport and schema reader | TASK-16 (SQLite) | SQLite; Postgres in TASK-17 |
 | sandbox | TASK-16, TASK-17 | temp-file SQLite; cloned Postgres cluster; later containers |
 | version runner | TASK-32 | fresh run; pre-boot run (Rails) |

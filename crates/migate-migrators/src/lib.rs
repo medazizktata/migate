@@ -184,16 +184,40 @@ impl Migrator {
         self.checksum
     }
 
+    /// Whether a project file (path relative to the project, with '/') is one this migrator reads.
+    pub fn matches(&self, path: &str) -> bool {
+        self.pattern.is_match(path)
+    }
+
     /// The project's migrations, from `(path relative to the project with '/', contents)` pairs. Files the pattern
     /// does not match are ignored (Payload's `index.ts`, Rails' `schema.rb`).
     pub fn migrations(&self, files: &[(String, String)]) -> Result<Vec<Migration>, Error> {
+        Ok(self
+            .migration_files(files)?
+            .into_iter()
+            .map(|(m, _)| m)
+            .collect())
+    }
+
+    /// Like [`Migrator::migrations`], with the path of the file that holds each migration (for hashing). For stable
+    /// Drizzle that is `<folder>/<tag>.sql` next to `meta/_journal.json`.
+    pub fn migration_files(
+        &self,
+        files: &[(String, String)],
+    ) -> Result<Vec<(Migration, String)>, Error> {
         let mut out = Vec::new();
         for (path, text) in files {
             let Some(caps) = self.pattern.captures(path) else {
                 continue;
             };
             match self.version_source {
-                VersionSource::DrizzleJournal => out.extend(drizzle_journal(path, text)?),
+                VersionSource::DrizzleJournal => {
+                    let folder = path.strip_suffix("meta/_journal.json").unwrap_or_default();
+                    out.extend(drizzle_journal(path, text)?.into_iter().map(|m| {
+                        let file = format!("{folder}{}.sql", m.id);
+                        (m, file)
+                    }));
+                }
                 VersionSource::Path => {
                     let id = &caps["id"];
                     let version = &caps["version"];
@@ -202,7 +226,7 @@ impl Migrator {
                         Some(GraphKind::Django) => django_parents(text),
                         None => Vec::new(),
                     };
-                    out.push(Migration {
+                    let migration = Migration {
                         id: if group.is_empty() {
                             id.to_string()
                         } else {
@@ -211,7 +235,8 @@ impl Migrator {
                         version: version.to_string(),
                         group: group.to_string(),
                         parents,
-                    });
+                    };
+                    out.push((migration, path.clone()));
                 }
             }
         }
@@ -469,6 +494,29 @@ mod tests {
         let f = check(m.policy(), &got, &ran(&["1700000000000", "1700000900000"]));
         assert_eq!(rules(&f), vec![("MG004", Severity::Error)]);
         assert!(f[0].message.contains("silently skip"));
+    }
+
+    #[test]
+    fn migration_files_know_where_each_migration_lives() {
+        let drizzle = get("drizzle").unwrap().unwrap();
+        let got = drizzle
+            .migration_files(&files(&[("db/drizzle/meta/_journal.json", JOURNAL)]))
+            .unwrap();
+        let paths: Vec<&str> = got.iter().map(|(_, p)| p.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["db/drizzle/0000_init.sql", "db/drizzle/0001_add.sql"]
+        );
+        let rails = get("rails").unwrap().unwrap();
+        assert!(rails.matches("db/migrate/20260101000000_create_orders.rb"));
+        assert!(!rails.matches("db/schema.rb"));
+        let got = rails
+            .migration_files(&files(&[(
+                "db/migrate/20260101000000_create_orders.rb",
+                "",
+            )]))
+            .unwrap();
+        assert_eq!(got[0].1, "db/migrate/20260101000000_create_orders.rb");
     }
 
     #[test]
