@@ -103,6 +103,29 @@ Contracts accepted: none
 
 Each step is useful on its own; none requires the next.
 
+## Large databases
+
+**The main check does not touch production data.** The old app's tests run against a throwaway database built from your
+migrations, empty or filled by your tests' own fixtures. A 5 TB production database and a 5 MB one give the same
+throwaway schema; only a very large schema or a long migration history makes that step slower. The reverse direction
+(the new app on the old schema, when code ships before its migration) and the rollback check run the same way.
+
+Size matters in three places, and migate handles each without copying production:
+
+| Question | Why size matters | What migate does |
+|---|---|---|
+| Will the migration fail on existing rows (NOT NULL on a column with NULLs, UNIQUE with duplicates)? | Counting violations means scanning big tables | Bounded, time-limited, read-only queries at release; statistics before scans (Postgres keeps a NULL fraction per column), sampling, or a read replica. A timeout reports "not checked", never "fine". |
+| Will it lock the table or run for hours? | Locks and rewrites grow with table size | The catalog's row estimate (no scan) turns a risky change on a big table from a warning into an error; migrations must set a lock timeout; lock findings from Squawk are imported. Running big changes online is the job of tools like gh-ost, pt-online-schema-change or pgroll. |
+| Will it lose or corrupt data (backfills, table rebuilds)? | A full copy for a rehearsal is impractical at terabytes | The rehearsal stays optional and uses a copy-on-write clone (a Neon branch, an Aurora clone, a filesystem snapshot) or a sampled subset. Without one, data-changing statements are flagged for human review, never passed. |
+
+**One trap migate refuses to fall into:** a backfill (`UPDATE ... SET ...`) is instant on an empty throwaway database and
+can take hours in production. "It ran fast in the sandbox" is never read as safe; data-changing statements are weighed
+against production's row estimates. Projects with many databases (one per tenant) get the read-only checks per database,
+within a time budget.
+
+Not yet measured: all tests so far used small schemas and little data. A spike on tables with tens of millions of rows is
+planned before large-database support is claimed.
+
 ## Principles
 
 - **It guards your migration tool; it does not replace it.** You keep Prisma, Drizzle, Payload, Rails, Django, Flyway or
@@ -166,7 +189,7 @@ Each step is useful on its own; none requires the next.
   migate falls back to the schema check and model probes and says so.
 - **Rails needs a special run** (the old app booted before the migration), which no test runner does out of the box.
 - **One maintainer, many integrations.** Keeping migration tools as data files and the core small is the defence.
-- **Only partly tested so far:** MySQL, SQL Server, production D1 and real CI runners.
+- **Only partly tested so far:** MySQL, SQL Server, production D1, real CI runners and large databases.
 
 ## Where it stands (2026-11-19)
 

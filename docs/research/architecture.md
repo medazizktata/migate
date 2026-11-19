@@ -402,6 +402,9 @@ Syntax, in any comment style in the migration file, or as `[[contract]]` in conf
      read-only connection: NULLs for a new NOT NULL, duplicates for a new UNIQUE, orphans for a new FK, the longest value
      for a narrowed type, the catalog's row estimate for lock risk, index-scan counts before dropping an index (MG403).
      Counts only; no rows leave production; a timeout reports "not checked", never a pass.
+     (revised) For large databases: statistics before scans (`pg_stats.null_frac`, `n_distinct`), `TABLESAMPLE`,
+     or a read replica as the target; the catalog's row estimate escalates lock-risk findings on big tables; DML
+     (MG701) is weighed against row estimates, since a backfill that is instant on the empty sandbox can take hours.
   3. **Rehearsal on a production copy** (opt-in, protected job): `pg_dump`/`pg_restore`, a restored host snapshot, a
      Neon branch, later other adapters (a GFS full clone once the general solution is proven). Measures duration and
      catches failures nobody thought to query. Copying production data needs masking or a deliberate decision.
