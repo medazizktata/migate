@@ -222,6 +222,7 @@ dependencies = [
  "migate-migrators",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

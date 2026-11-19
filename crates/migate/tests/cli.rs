@@ -351,3 +351,112 @@ fn a_usage_error_is_exit_3_not_2() {
     let help = r.migate(&["--help"]);
     assert_eq!(help.status.code(), Some(0));
 }
+
+#[test]
+fn the_config_file_supplies_the_settings_and_flags_win() {
+    let r = rails();
+    r.write("migate.toml", "migrator = \"rails\"\nbase = \"main\"\n");
+    let out = r.migate(&["check"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("migrator: rails, base: main"), "{text}");
+    // A flag overrides the file: the wrong migrator reads no Rails migrations.
+    let out = r.migate(&["check", "--migrator", "payload"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("in 0 migration(s) (migrator: payload"));
+    // Unknown keys are refused, so a typo cannot silently change nothing. The file is otherwise valid: without the
+    // refusal this check would pass (exit 0) while ignoring the misspelled `ledgr`.
+    r.write(
+        "migate.toml",
+        "migrator = \"rails\"\nbase = \"main\"\nledgr = \"other.json\"\n",
+    );
+    let out = r.migate(&["check"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown field `ledgr`"));
+}
+
+#[test]
+fn no_migrator_anywhere_is_exit_3() {
+    let r = Repo::new();
+    let out = r.migate(&["check", "--base", "main"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no migrator"));
+}
+
+#[test]
+fn json_output_lists_findings_with_their_files() {
+    let r = rails();
+    r.write(TOTAL, &r.read(TOTAL).replace(":integer", ":bigint"));
+    let out = r.migate(&[
+        "check",
+        "--migrator",
+        "rails",
+        "--base",
+        "main",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["checked"], 2);
+    assert_eq!(v["summary"]["errors"], 1);
+    assert_eq!(v["findings"][0]["rule"], "MG001");
+    assert_eq!(v["findings"][0]["file"], TOTAL);
+}
+
+#[test]
+fn sarif_output_has_rules_results_and_stable_fingerprints() {
+    let r = rails();
+    r.write(TOTAL, &r.read(TOTAL).replace(":integer", ":bigint"));
+    let out = r.migate(&[
+        "check",
+        "--migrator",
+        "rails",
+        "--base",
+        "main",
+        "--format",
+        "sarif",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["version"], "2.1.0");
+    let run = &v["runs"][0];
+    assert_eq!(run["tool"]["driver"]["name"], "migate");
+    assert_eq!(run["tool"]["driver"]["rules"][0]["id"], "MG001");
+    assert_eq!(run["results"][0]["ruleId"], "MG001");
+    assert_eq!(run["results"][0]["level"], "error");
+    assert_eq!(
+        run["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+        TOTAL
+    );
+    assert_eq!(
+        run["results"][0]["partialFingerprints"]["migate/v1"],
+        "MG001:20260102000000_add_total"
+    );
+}
+
+#[test]
+fn record_all_adopts_every_migration_and_conflicts_with_ids() {
+    let r = Repo::new();
+    r.write(ORDERS, "create_table :orders\n");
+    r.write(TOTAL, "add_column :orders, :total, :integer\n");
+    let out = r.migate(&["ledger", "record", "--migrator", "rails", "--all"]);
+    assert!(out.status.success());
+    let ledger = r.read("migate-ledger.json");
+    assert!(
+        ledger.contains("20260101000000_create_orders")
+            && ledger.contains("20260102000000_add_total")
+    );
+    let both = r.migate(&[
+        "ledger",
+        "record",
+        "--migrator",
+        "rails",
+        "--all",
+        "20260101000000_create_orders",
+    ]);
+    assert_eq!(
+        both.status.code(),
+        Some(3),
+        "--all with ids is a usage error"
+    );
+}

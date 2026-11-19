@@ -6,8 +6,10 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 mod check;
+mod config;
 mod git;
 mod ledger_file;
+mod output;
 mod project;
 
 /// Exit codes: 0 clean (warnings and notes allowed), 2 errors found, 3 could not check.
