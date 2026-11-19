@@ -989,3 +989,75 @@ fn sandbox_finds_the_database_among_files_the_tool_writes() {
     assert_eq!(code, 0, "{out}{err}");
     assert!(out.contains("MG210"), "{out}");
 }
+
+#[test]
+fn schema_findings_point_at_the_migration_that_made_them() {
+    let r = sandbox_repo_with(
+        SANDBOX_TOML,
+        OLD_APP_WITHOUT_LEGACY,
+        "ALTER TABLE users ADD COLUMN nickname TEXT;",
+    );
+    r.write(
+        "migrations/0003_drop.sql",
+        "-- legacy_notes stays; this drops the other one\nALTER TABLE users DROP COLUMN legacy;\n",
+    );
+    r.commit("drop");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("main.users.legacy: column dropped (migrations/0003_drop.sql:2)"),
+        "{out}"
+    );
+    assert!(
+        out.contains("main.users.nickname: column added (migrations/0002_change.sql:1)"),
+        "{out}"
+    );
+    let json = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .args(["check", "--format", "json"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    let dropped = v["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["rule"] == "MG201")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (dropped["file"].as_str(), dropped["line"].as_u64()),
+        (Some("migrations/0003_drop.sql"), Some(2))
+    );
+}
+
+#[test]
+fn a_run_that_could_not_check_still_reports_to_machines() {
+    let r = sandbox_repo(
+        &SANDBOX_TOML.replace("python3 old_app.py", "true"),
+        "SELECT 1;",
+    );
+    let run = |format: &str| {
+        Command::new(env!("CARGO_BIN_EXE_migate"))
+            .current_dir(&r.dir)
+            .args(["check", "--format", format])
+            .output()
+            .unwrap()
+    };
+    let json = run("json");
+    assert_eq!(json.status.code(), Some(3));
+    let v: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(v["outcome"], "could-not-check");
+    assert!(v["error"].as_str().unwrap().contains("MG813"), "{v}");
+    let sarif = run("sarif");
+    assert_eq!(sarif.status.code(), Some(3));
+    let v: serde_json::Value = serde_json::from_slice(&sarif.stdout).unwrap();
+    let invocation = &v["runs"][0]["invocations"][0];
+    assert_eq!(invocation["executionSuccessful"], false);
+    assert!(
+        invocation["toolExecutionNotifications"][0]["message"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("MG813")
+    );
+}

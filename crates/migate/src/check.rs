@@ -125,6 +125,9 @@ pub fn check(args: &CheckArgs) -> Outcome {
         }
         Err(e) => {
             eprintln!("migate: could not check: {e}");
+            if let Some(report) = output::render_failure(args.format, &e) {
+                print!("{report}");
+            }
             Outcome::CouldNotCheck
         }
     }

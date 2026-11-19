@@ -16,6 +16,8 @@ pub struct Finding {
     /// The migration or object the finding is about.
     pub object: String,
     pub message: String,
+    /// Where in the project it comes from: a file relative to the project, and a line (1-based).
+    pub at: Option<(String, u32)>,
 }
 
 impl Finding {
@@ -30,6 +32,13 @@ impl Finding {
             severity,
             object: object.into(),
             message: message.into(),
+            at: None,
         }
+    }
+
+    /// The same finding, placed at `file:line`.
+    pub fn at(mut self, file: impl Into<String>, line: u32) -> Self {
+        self.at = Some((file.into(), line));
+        self
     }
 }

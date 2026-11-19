@@ -59,8 +59,11 @@ pub fn render(format: Format, findings: &[Finding], cx: &Context) -> String {
 fn text(findings: &[Finding], cx: &Context) -> String {
     let mut out = String::new();
     for f in sorted(findings) {
+        let place =
+            f.at.as_ref()
+                .map_or(String::new(), |(file, line)| format!(" ({file}:{line})"));
         out.push_str(&format!(
-            "{:<8}{}  {}: {}\n",
+            "{:<8}{}  {}: {}{place}\n",
             level(f.severity),
             f.rule,
             f.object,
@@ -79,6 +82,7 @@ fn json_report(findings: &[Finding], cx: &Context) -> Value {
     let (e, w, n) = counts(findings);
     json!({
         "migate": env!("CARGO_PKG_VERSION"),
+        "outcome": if e > 0 { "errors" } else { "clean" },
         "migrator": cx.migrator,
         "base": cx.base,
         "checked": cx.checked,
@@ -87,14 +91,46 @@ fn json_report(findings: &[Finding], cx: &Context) -> Value {
             "rule": f.rule,
             "severity": level(f.severity),
             "object": f.object,
-            "file": file_of(f, cx),
+            "file": file_of(f, cx).0,
+            "line": file_of(f, cx).1,
             "message": f.message,
         })).collect::<Vec<_>>(),
     })
 }
 
-fn file_of<'a>(f: &Finding, cx: &'a Context) -> &'a str {
-    cx.files.get(&f.object).map_or(cx.ledger, String::as_str)
+/// Where a finding points: its own place, else the migration it names, else the ledger.
+fn file_of<'a>(f: &'a Finding, cx: &'a Context) -> (&'a str, u32) {
+    match &f.at {
+        Some((file, line)) => (file, *line),
+        None => (cx.files.get(&f.object).map_or(cx.ledger, String::as_str), 1),
+    }
+}
+
+/// The machine-readable result of a run that could not check anything (exit 3); `None` for text, which goes to
+/// stderr. CI reads this to show why, instead of an empty report.
+pub fn render_failure(format: Format, error: &str) -> Option<String> {
+    let v = match format {
+        Format::Text => return None,
+        Format::Json => json!({
+            "migate": env!("CARGO_PKG_VERSION"),
+            "outcome": "could-not-check",
+            "error": error,
+            "findings": [],
+        }),
+        Format::Sarif => json!({
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+                "tool": { "driver": { "name": "migate", "version": env!("CARGO_PKG_VERSION"), "rules": [] } },
+                "invocations": [{
+                    "executionSuccessful": false,
+                    "toolExecutionNotifications": [{ "level": "error", "message": { "text": error } }],
+                }],
+                "results": [],
+            }],
+        }),
+    };
+    Some(v.to_string() + "\n")
 }
 
 fn sarif(findings: &[Finding], cx: &Context) -> Value {
@@ -127,8 +163,8 @@ fn sarif(findings: &[Finding], cx: &Context) -> Value {
                 "message": { "text": format!("{}: {}", f.object, f.message) },
                 "locations": [{
                     "physicalLocation": {
-                        "artifactLocation": { "uri": file_of(f, cx) },
-                        "region": { "startLine": 1 }
+                        "artifactLocation": { "uri": file_of(f, cx).0 },
+                        "region": { "startLine": file_of(f, cx).1 }
                     }
                 }],
                 // Stable across runs and line moves, so code scanning tracks one alert per rule and object.

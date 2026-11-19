@@ -122,19 +122,22 @@ pub fn run(
     let head_co = Checkout::add(root, "HEAD", &tmp.0.join("head"))?;
     let (base_dir, head_dir) = (base_co.0.join(prefix.trim()), head_co.0.join(prefix.trim()));
 
-    // Contract markers count only in migrations this change adds: an old one would otherwise accept future changes.
+    // The migrations this change adds: where findings point, and the only place contract markers count (an old marker
+    // would otherwise accept future changes).
     let at_base: BTreeSet<String> = project::read(&base_dir, migrator)?
         .files
         .into_iter()
         .map(|f| f.path)
         .collect();
-    let (mut markers, mut bad_markers) = (Vec::new(), Vec::new());
-    for f in project::read(&head_dir, migrator)?
+    let added: Vec<(String, String)> = project::read(&head_dir, migrator)?
         .files
         .into_iter()
         .filter(|f| !at_base.contains(&f.path))
-    {
-        let (m, bad) = contract::parse(&f.path, &String::from_utf8_lossy(&f.bytes));
+        .map(|f| (f.path, String::from_utf8_lossy(&f.bytes).into_owned()))
+        .collect();
+    let (mut markers, mut bad_markers) = (Vec::new(), Vec::new());
+    for (path, text) in &added {
+        let (m, bad) = contract::parse(path, text);
         markers.extend(m);
         bad_markers.extend(bad);
     }
@@ -221,7 +224,8 @@ pub fn run(
             Severity::Error,
             "head migrations",
             format!(
-                "the migrations fail on a database at {base}; schema changes listed here were left behind:\n{}",
+                "the migrations fail on a database at {base}; any schema change they made before failing is a finding \
+                 of its own:\n{}",
                 tail(&out)
             ),
         ));
@@ -289,12 +293,39 @@ pub fn run(
         )),
         (Some(_), false) => {}
     }
+    let findings: Vec<Finding> = findings.into_iter().map(|f| place(f, &added)).collect();
     let mut findings = contract::apply(findings, &markers);
     findings.extend(bad_markers);
     Ok(findings)
 }
 
-/// The database file: `{db}` unless `[sandbox] database` names another place; `None` if nothing is there.
+/// Point a finding at the added migration that names its object (the latest one, at the first line naming it), else at
+/// the latest added migration. Findings stay unplaced when the change adds no migration.
+fn place(f: Finding, added: &[(String, String)]) -> Finding {
+    let Some((last, _)) = added.last() else {
+        return f;
+    };
+    let name = f
+        .object
+        .rsplit('.')
+        .next()
+        .unwrap_or(&f.object)
+        .to_ascii_lowercase();
+    let word = |line: &str| {
+        let line = line.to_ascii_lowercase();
+        line.match_indices(&name).any(|(i, _)| {
+            let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+            ok(line[..i].chars().next_back()) && ok(line[i + name.len()..].chars().next())
+        })
+    };
+    for (path, text) in added.iter().rev() {
+        if let Some(n) = text.lines().position(word) {
+            return f.at(path.clone(), u32::try_from(n + 1).unwrap_or(1));
+        }
+    }
+    f.at(last.clone(), 1)
+}
+
 /// The database file: `{db}`, or the file `database` names (one `*` in the file name may match several; the one holding
 /// the migration history is the database).
 fn locate(database: Option<String>, db: &Path, history: &str) -> Result<Option<PathBuf>, String> {
