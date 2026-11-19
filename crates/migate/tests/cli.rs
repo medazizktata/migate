@@ -1095,3 +1095,26 @@ fn a_migrator_that_finds_no_migrations_has_checked_nothing() {
         "an empty ledger was written"
     );
 }
+
+#[test]
+fn an_old_branch_migration_is_flagged_before_any_ledger_exists() {
+    let r = Repo::new();
+    r.write("migrations/0001_init.sql", "CREATE TABLE a (id INTEGER);");
+    r.write("migrations/0003_c.sql", "CREATE TABLE c (id INTEGER);");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write("migrations/0002_b.sql", "CREATE TABLE b (id INTEGER);");
+    r.commit("late branch");
+    let (code, out, err) = r.check("wrangler-d1");
+    assert_eq!(code, 0, "Wrangler warns: {out}{err}");
+    assert!(
+        out.contains("warning MG004") && out.contains("0002_b.sql"),
+        "{out}"
+    );
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["checkout", "-q", "-b", "pr2"]);
+    r.write("migrations/0004_d.sql", "CREATE TABLE d (id INTEGER);");
+    r.commit("in order");
+    let (_, out, _) = r.check("wrangler-d1");
+    assert!(!out.contains("MG004"), "{out}");
+}

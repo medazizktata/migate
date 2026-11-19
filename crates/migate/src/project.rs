@@ -65,6 +65,46 @@ pub fn read(root: &Path, migrator: &Migrator) -> Result<Project, String> {
     })
 }
 
+/// The migrations at a git revision (the base branch), read from git without a checkout.
+pub fn migrations_at(
+    root: &Path,
+    rev: &str,
+    migrator: &Migrator,
+) -> Result<Vec<Migration>, String> {
+    let listed = crate::git::git(
+        root,
+        &["ls-tree", "-r", "-z", "--name-only", rev, "--", "."],
+    )?;
+    if !listed.status.success() {
+        return Err(format!(
+            "cannot list the files at `{rev}`: {}",
+            String::from_utf8_lossy(&listed.stderr).trim()
+        ));
+    }
+    let mut inputs = Vec::new();
+    for rel in String::from_utf8_lossy(&listed.stdout).split('\0') {
+        if rel.is_empty()
+            || rel.split('/').any(|part| SKIP.contains(&part))
+            || !migrator.matches(rel)
+        {
+            continue;
+        }
+        let shown = crate::git::git(root, &["show", &format!("{rev}:./{rel}")])?;
+        if !shown.status.success() {
+            return Err(format!("cannot read {rel} at `{rev}`"));
+        }
+        inputs.push((
+            rel.to_string(),
+            String::from_utf8_lossy(&shown.stdout).into_owned(),
+        ));
+    }
+    inputs.sort();
+    let found = migrator
+        .migration_files(&inputs)
+        .map_err(|e| e.to_string())?;
+    Ok(found.into_iter().map(|(m, _)| m).collect())
+}
+
 /// Paths relative to `root`: tracked files, and untracked ones git does not ignore.
 fn git_files(root: &Path) -> Result<Vec<String>, String> {
     let out = crate::git::git(
