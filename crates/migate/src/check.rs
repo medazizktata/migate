@@ -138,6 +138,7 @@ type Checked = (Vec<Finding>, BTreeMap<String, String>, usize);
 /// The findings, each migration's file, and how many migrations were read (so an empty pass is visible as one).
 fn run_check(s: &Settings) -> Result<Checked, String> {
     let project = project::read(&s.root, &s.migrator)?;
+    found_any(&project, s)?;
     let head = ledger_file::read(&s.root.join(&s.ledger))?;
     let base = match file_at_base(&s.root, &s.base, &s.ledger)? {
         AtBase::Found(text) => ledger_file::parse(&text, &format!("{}:{}", s.base, s.ledger))?,
@@ -180,6 +181,29 @@ fn run_check(s: &Settings) -> Result<Checked, String> {
     Ok((findings, files, project.migrations.len()))
 }
 
+/// No migration found means nothing was checked: usually the wrong migrator, so name the ones whose layout matches.
+fn found_any(project: &project::Project, s: &Settings) -> Result<(), String> {
+    if !project.migrations.is_empty() {
+        return Ok(());
+    }
+    let fitting: Vec<String> = migate_migrators::bundled()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|m| project::read(&s.root, m).is_ok_and(|p| !p.migrations.is_empty()))
+        .map(|m| m.id)
+        .collect();
+    let hint = if fitting.is_empty() {
+        "no bundled migrator matches any file here either".to_string()
+    } else {
+        format!("files here match: {}", fitting.join(", "))
+    };
+    Err(format!(
+        "no {} migrations found in {}, so nothing was checked; {hint}",
+        s.migrator.id,
+        s.root.display()
+    ))
+}
+
 pub fn record(args: &RecordArgs) -> Outcome {
     match settings(&args.common, None).and_then(|s| run_record(args, &s)) {
         Ok(out) => out,
@@ -194,6 +218,9 @@ fn run_record(args: &RecordArgs, s: &Settings) -> Result<Outcome, String> {
     let project = project::read(&s.root, &s.migrator)?;
     let path = s.root.join(&s.ledger);
     let mut ledger = ledger_file::read(&path)?;
+    if args.all {
+        found_any(&project, s)?;
+    }
     let ids: Vec<String> = if args.all {
         project.files.iter().map(|f| f.id.clone()).collect()
     } else {

@@ -335,6 +335,10 @@ fn an_unknown_migrator_is_exit_3() {
 fn an_old_format_ledger_is_exit_3_with_a_hint() {
     let r = Repo::new();
     r.write(
+        ORDERS,
+        "class CreateOrders < ActiveRecord::Migration[8.1]; end\n",
+    );
+    r.write(
         "migate-ledger.json",
         r#"{"20260101000000_create_orders": "abc123"}"#,
     );
@@ -379,9 +383,14 @@ fn the_config_file_supplies_the_settings_and_flags_win() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{text}");
     assert!(text.contains("migrator: rails, base: main"), "{text}");
-    // A flag overrides the file: the wrong migrator reads no Rails migrations.
+    // A flag overrides the file: the wrong migrator finds no Rails migrations, so nothing was checked.
     let out = r.migate(&["check", "--migrator", "payload"]);
-    assert!(String::from_utf8_lossy(&out.stdout).contains("in 0 migration(s) (migrator: payload"));
+    assert_eq!(out.status.code(), Some(3));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("no payload migrations") && err.contains("files here match: rails"),
+        "{err}"
+    );
     // Unknown keys are refused, so a typo cannot silently change nothing. The file is otherwise valid: without the
     // refusal this check would pass (exit 0) while ignoring the misspelled `ledgr`.
     r.write(
@@ -1059,5 +1068,30 @@ fn a_run_that_could_not_check_still_reports_to_machines() {
             .as_str()
             .unwrap()
             .contains("MG813")
+    );
+}
+
+#[test]
+fn a_migrator_that_finds_no_migrations_has_checked_nothing() {
+    // Wrangler-D1 files, checked as Rails: nothing matches, which must never read as a pass.
+    let r = Repo::new();
+    r.write("migrations/0001_init.sql", "CREATE TABLE a (id INTEGER);");
+    r.commit("init");
+    let (code, out, err) = r.check("rails");
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("no rails migrations") && err.contains("wrangler-d1"),
+        "{err}"
+    );
+    let out = r.record("rails", &["--all"]);
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !r.dir.join("migate-ledger.json").exists(),
+        "an empty ledger was written"
     );
 }
