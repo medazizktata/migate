@@ -9,6 +9,7 @@ history.
 Status: research and decisions done, nothing built yet. (Earlier documents call it `migration-guard`, its working name.)
 Licence: Apache-2.0 (`LICENSE`). Start here:
 
+- `docs/product.md`: the product: the problem, who it is for, what it does, what it is not, and where it stands.
 - `docs/research/README.md`: the summary: the gap, the validation, the architecture, the stack, what is not verified,
   and the decisions taken.
 - `docs/research/validation.md`: is the problem real and weighty (41 classified incidents, kill criteria, the case
