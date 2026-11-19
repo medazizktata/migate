@@ -1,0 +1,15 @@
+[package]
+name = "migate-core"
+description = "migate's engine-, host- and migrator-neutral core: schema model, diff, classifier, ledger, order models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The core stays pure: no database driver, async runtime or git library may appear in this crate's dependency tree.
+# scripts/check-core-deps.sh enforces it against an allowlist; add a crate here only after adding it there, on purpose.
+[dependencies]
+
+[lints]
+workspace = true
