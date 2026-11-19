@@ -9,6 +9,7 @@
 //! [sandbox]
 //! env = { DATABASE_URL = "sqlite:///{db}" }   # how the project is told where the database is; {db} is its path
 //! database_name = "app"                        # Wrangler D1: the database's name in wrangler.toml
+//! shared = "apps/web/.wrangler"                # a database the project keeps inside its own checkout
 //! setup = "npm ci"                             # run in each checkout first (a fresh checkout has no dependencies)
 //! seed = "npm run seed"                        # optional: rows for the data-loss check
 //! test = "npm test"                            # the base version's tests, run against the migrated database
@@ -46,6 +47,10 @@ pub struct Sandbox {
     pub database: Option<String>,
     /// Replaces the migrator's migrate command.
     pub migrate: Option<String>,
+    /// A folder inside the project where the migrate command keeps its database when it cannot be told where (a local
+    /// D1 under `.wrangler`, say). Both checkouts get it as a link to `{dir}/shared`, so base and head migrate one
+    /// database; name the file with `database = "{dir}/shared/..."`.
+    pub shared: Option<String>,
     /// The database's name in the project's own configuration, for migrate commands that need one (`{database}`;
     /// Wrangler D1's database name or binding).
     pub database_name: Option<String>,

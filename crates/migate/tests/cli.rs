@@ -1137,3 +1137,23 @@ fn temp_files_the_project_makes_go_with_the_run() {
         "a temp file the test wrote outlived the run"
     );
 }
+
+#[test]
+fn a_database_the_project_keeps_inside_its_checkout_is_shared_by_base_and_head() {
+    // Like a local D1 under apps/web/.wrangler: the runner takes no setting and always writes inside the checkout.
+    let fixed = SANDBOX_TOML
+        .replace("migrate = \"python3 apply.py\"", "migrate = \"mkdir -p state && D1_PATH=state/db.sqlite python3 apply.py\"\nshared = \"state\"\ndatabase = \"{dir}/shared/db.sqlite\"")
+        .replace("env = { D1_PATH = \"{db}\" }", "env = { D1_PATH = \"{dir}/shared/db.sqlite\" }");
+    let r = sandbox_repo(&fixed, "ALTER TABLE users DROP COLUMN legacy;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG201") && out.contains("main.users.legacy"),
+        "{out}"
+    );
+    let escaping = fixed.replace("shared = \"state\"", "shared = \"../escape\"");
+    let r = sandbox_repo(&escaping, "SELECT 1;");
+    let (code, _, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("must be a folder inside the project"), "{err}");
+}

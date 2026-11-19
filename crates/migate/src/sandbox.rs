@@ -148,6 +148,10 @@ pub fn run(
         bad_markers.extend(bad);
     }
 
+    if let Some(rel) = &cfg.shared {
+        share(rel, &dir.join("shared"), &[&base_dir, &head_dir])?;
+    }
+
     if let Some(setup) = &cfg.setup {
         for (name, d) in [("base", &base_dir), ("head", &head_dir)] {
             let out = sh(&vars(setup), d, &env)?;
@@ -303,6 +307,36 @@ pub fn run(
     let mut findings = contract::apply(findings, &markers);
     findings.extend(bad_markers);
     Ok(findings)
+}
+
+/// Make `rel` in each checkout a link to one folder, so base and head migrate the same database.
+fn share(rel: &str, target: &Path, checkouts: &[&PathBuf]) -> Result<(), String> {
+    let path = Path::new(rel);
+    if rel.is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err(format!(
+            "[sandbox] shared must be a folder inside the project, not `{rel}`"
+        ));
+    }
+    std::fs::create_dir_all(target).map_err(|e| format!("{}: {e}", target.display()))?;
+    for checkout in checkouts {
+        let link = checkout.join(path);
+        if link.symlink_metadata().is_ok() {
+            return Err(format!(
+                "[sandbox] shared `{rel}` is in the repository; it must be a folder git does not track"
+            ));
+        }
+        if let Some(parent) = link.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        std::os::unix::fs::symlink(target, &link)
+            .map_err(|e| format!("{}: {e}", link.display()))?;
+    }
+    Ok(())
 }
 
 /// Point a finding at the added migration that names its object (the latest one, at the first line naming it), else at
