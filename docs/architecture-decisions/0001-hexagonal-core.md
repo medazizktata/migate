@@ -31,8 +31,9 @@ the file system and the teams' own test commands are slow, varied and hard to fa
 | `migate-migrators` | migration-tool definitions (TOML) and their interpreter | yes |
 | `migate` | CLI, composition root | yes: `check`, `ledger record` |
 | (in `migate`: `project.rs`, `git.rs`, `ledger_file.rs`) | project files, the git base lookup, the ledger file | done in TASK-37; a separate crate when a second consumer needs it |
-| `migate-engine-sqlite` | SQLite (and D1's local files) schema reader and a temp-file sandbox; no engine trait yet | done in TASK-16 |
-| `migate-engine-postgres`, later MySQL and SQL Server | schema reader, transport, sandbox per engine; the engine trait arrives with the second engine | TASK-17 onward |
+| (in `migate-core`: `engine.rs`) | the engine port: `Sandbox` (placeholders, open the migrated database) and `Database` (snapshot, row counts, drop all but the history); declarations only | yes, with the second engine |
+| `migate-engine-sqlite` | SQLite (and D1's local files) schema reader and a temp-file sandbox, behind the engine port | done in TASK-16 |
+| `migate-engine-postgres`, later MySQL and SQL Server | schema reader, transport, sandbox per engine, each implementing the engine port | TASK-17 onward |
 | (in `migate`: `sandbox.rs`) | the two-checkout throwaway-database run: migrate at base and HEAD, diff, the base version's tests (fresh mode) | SQLite; a `migate-runner` crate when the pre-boot mode or a second engine needs it (TASK-32) |
 | `migate-host-*` | production history, read-only checks, restore points | with TASK-21, TASK-22 |
 | `migate-report` | text, JSON, SARIF, PR comment | with TASK-24 |

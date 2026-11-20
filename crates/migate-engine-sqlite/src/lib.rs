@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use migate_core::engine;
 use migate_core::schema::{
     Column, DataType, Detail, ForeignKey, Generated, Index, IndexPart, Kind, Object, Snapshot,
     TypeFamily,
@@ -721,6 +722,97 @@ fn data_type(declared: &str) -> DataType {
         length: None,
         precision: None,
         scale: None,
+    }
+}
+
+/// The SQLite engine behind the engine port: a database file the project's migrate command writes, at `db` unless a
+/// pattern names where the tool writes it.
+#[derive(Debug)]
+pub struct Throwaway {
+    db: PathBuf,
+    pattern: Option<String>,
+}
+
+impl Throwaway {
+    pub fn new(db: PathBuf, pattern: Option<String>) -> Throwaway {
+        Throwaway { db, pattern }
+    }
+}
+
+impl engine::Sandbox for Throwaway {
+    fn placeholders(&self) -> Vec<(&'static str, String)> {
+        vec![("db", self.db.to_string_lossy().into_owned())]
+    }
+
+    fn open(&self, history: &str) -> Result<Box<dyn engine::Database + '_>, String> {
+        let path = locate(self.pattern.as_deref(), &self.db, history)?
+            .ok_or_else(|| format!("no database at {}", self.db.display()))?;
+        Ok(Box::new(File(path)))
+    }
+}
+
+/// The database file the migrate command wrote.
+#[derive(Debug)]
+struct File(PathBuf);
+
+impl engine::Database for File {
+    fn snapshot(&self) -> Result<Snapshot, String> {
+        snapshot(&self.0).map_err(|e| e.0)
+    }
+    fn count_rows(&self, sql: &str) -> Result<usize, String> {
+        count_rows(&self.0, sql).map_err(|e| e.0)
+    }
+    fn row_counts(&self) -> Result<BTreeMap<String, u64>, String> {
+        row_counts(&self.0).map_err(|e| e.0)
+    }
+    fn drop_all_but(&self, keep: &str) -> Result<(), String> {
+        drop_all_but(&self.0, keep).map_err(|e| e.0)
+    }
+}
+
+/// The database file: `db`, or the file `pattern` names (one `*` in the file name may match several; the one holding
+/// the migration history is the database).
+fn locate(pattern: Option<&str>, db: &Path, history: &str) -> Result<Option<PathBuf>, String> {
+    let Some(pattern) = pattern else {
+        return Ok(db.is_file().then(|| db.to_path_buf()));
+    };
+    let pattern = PathBuf::from(pattern);
+    let name = pattern
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let Some((pre, post)) = name.split_once('*') else {
+        return Ok(pattern.is_file().then_some(pattern));
+    };
+    // shortcut: one `*`, in the file name only; a full glob when a project needs one.
+    let parent = pattern.parent().unwrap_or(Path::new("."));
+    let mut hits: Vec<PathBuf> = std::fs::read_dir(parent)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let n = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            p.is_file()
+                && n.len() >= pre.len() + post.len()
+                && n.starts_with(pre)
+                && n.ends_with(post)
+        })
+        .collect();
+    if hits.len() > 1 {
+        hits.retain(|p| count_rows(p, history).is_ok());
+    }
+    match hits.len() {
+        0 => Ok(None),
+        1 => Ok(hits.pop()),
+        _ => Err(format!(
+            "the database pattern `{}` matches {} files holding a migration history; it must match one",
+            pattern.display(),
+            hits.len()
+        )),
     }
 }
 

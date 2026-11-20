@@ -5,6 +5,7 @@
 
 pub mod contract;
 pub mod diff;
+pub mod engine;
 pub mod finding;
 pub mod hash;
 pub mod ledger;

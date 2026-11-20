@@ -18,6 +18,7 @@ use signal_hook::iterator::Signals;
 
 use migate_core::contract;
 use migate_core::diff::{classify, diff};
+use migate_core::engine;
 use migate_core::{Finding, Severity};
 use migate_migrators::Migrator;
 
@@ -69,12 +70,25 @@ pub fn run(
     sweep(root, &tmp.0);
     let dir = tmp.0.join("db");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let db = dir.join("sandbox.db");
     let name = cfg.database_name.clone().unwrap_or_default();
+    // The migrator's location goes with its own command; a project that replaces the command says where it writes.
+    let tool_location = migrator
+        .migrate
+        .database
+        .as_deref()
+        .filter(|_| cfg.migrate.is_none());
+    let in_dir = |s: &str| s.replace("{dir}", &dir.to_string_lossy());
+    let sandbox: Box<dyn engine::Sandbox> = Box::new(migate_engine_sqlite::Throwaway::new(
+        dir.join("sandbox.db"),
+        cfg.database.as_deref().or(tool_location).map(in_dir),
+    ));
+    let placeholders = sandbox.placeholders();
     let vars = |s: &str| {
-        s.replace("{db}", &db.to_string_lossy())
-            .replace("{dir}", &dir.to_string_lossy())
-            .replace("{database}", &name)
+        let mut s = in_dir(s).replace("{database}", &name);
+        for (key, value) in &placeholders {
+            s = s.replace(&format!("{{{key}}}"), value);
+        }
+        s
     };
 
     let command = cfg.migrate.as_deref().unwrap_or(&migrator.migrate.command);
@@ -172,14 +186,6 @@ pub fn run(
             tail(&out)
         ));
     }
-    // The migrator's location goes with its own command; a project that replaces the command says where it writes.
-    let tool_location = migrator
-        .migrate
-        .database
-        .as_deref()
-        .filter(|_| cfg.migrate.is_none());
-    let pattern = cfg.database.as_deref().or(tool_location).map(vars);
-    let path = locate(pattern, &db, &migrator.history.query)?;
     let not_migrated = |why: String| {
         format!(
             "MG804 sandbox-not-migrated: {why}. The migrate command probably wrote somewhere else: check that it is \
@@ -187,10 +193,13 @@ pub fn run(
              --persist-to), and that [sandbox] database names the file it writes"
         )
     };
-    let path = path.ok_or_else(|| not_migrated(format!("no database at {}", db.display())))?;
+    let db = sandbox
+        .open(&migrator.history.query)
+        .map_err(not_migrated)?;
     let ran = project::read(&base_dir, migrator)?.migrations.len();
     if ran > 0 {
-        let rows = migate_engine_sqlite::count_rows(&path, &migrator.history.query)
+        let rows = db
+            .count_rows(&migrator.history.query)
             .map_err(|e| not_migrated(format!("its migration history cannot be read ({e})")))?;
         if rows == 0 {
             return Err(not_migrated(format!(
@@ -198,8 +207,7 @@ pub fn run(
             )));
         }
     }
-    let before = migate_engine_sqlite::snapshot(&path).map_err(|e| e.to_string())?;
-    let sql_err = |e: migate_engine_sqlite::Error| e.to_string();
+    let before = db.snapshot()?;
     let invalid =
         |why: String| format!("MG813 old-version-run-invalid: {why}. Nothing was checked");
 
@@ -221,11 +229,11 @@ pub fn run(
             )));
         }
     }
-    let rows_before = migate_engine_sqlite::row_counts(&path).map_err(sql_err)?;
+    let rows_before = db.row_counts()?;
 
     eprintln!("migate: migrating it to HEAD");
     let out = sh(&migrate, &head_dir, &migrate_env)?;
-    let after = migate_engine_sqlite::snapshot(&path).map_err(|e| e.to_string())?;
+    let after = db.snapshot()?;
     let mut findings = Vec::new();
     let migrated = out.status.success();
     if !migrated {
@@ -241,7 +249,7 @@ pub fn run(
         ));
     }
     findings.extend(classify(&diff(&before, &after)));
-    for (table, now) in migate_engine_sqlite::row_counts(&path).map_err(sql_err)? {
+    for (table, now) in db.row_counts()? {
         if let Some(&was) = rows_before.get(&table)
             && now < was
         {
@@ -256,8 +264,7 @@ pub fn run(
 
     match (&cfg.test, migrated) {
         (Some(test), true) => {
-            let history = migate_engine_sqlite::count_rows(&path, &migrator.history.query)
-                .map_err(sql_err)?;
+            let history = db.count_rows(&migrator.history.query)?;
             eprintln!("migate: running the base version's tests against it");
             let out = sh(&vars(test), &base_dir, &env)?;
             if !out.status.success() {
@@ -274,16 +281,14 @@ pub fn run(
             } else {
                 // Calibration, after a pass: the database must still be the migrated one, and the tests must notice
                 // when its tables are gone.
-                let still =
-                    migate_engine_sqlite::count_rows(&path, &migrator.history.query).unwrap_or(0);
+                let still = db.count_rows(&migrator.history.query).unwrap_or(0);
                 if still < history {
                     return Err(invalid(format!(
                         "the migration history went from {history} rows to {still} during the tests: they rebuilt the \
                      database instead of using the migrated one"
                     )));
                 }
-                migate_engine_sqlite::drop_all_but(&path, &migrator.history.query)
-                    .map_err(sql_err)?;
+                db.drop_all_but(&migrator.history.query)?;
                 eprintln!("migate: checking the tests notice a database with its tables dropped");
                 if sh(&vars(test), &base_dir, &env)?.status.success() {
                     return Err(invalid(
@@ -364,52 +369,6 @@ fn place(f: Finding, added: &[(String, String)]) -> Finding {
         }
     }
     f.at(last.clone(), 1)
-}
-
-/// The database file: `{db}`, or the file `database` names (one `*` in the file name may match several; the one holding
-/// the migration history is the database).
-fn locate(database: Option<String>, db: &Path, history: &str) -> Result<Option<PathBuf>, String> {
-    let Some(pattern) = database else {
-        return Ok(db.is_file().then(|| db.to_path_buf()));
-    };
-    let pattern = PathBuf::from(pattern);
-    let name = pattern
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let Some((pre, post)) = name.split_once('*') else {
-        return Ok(pattern.is_file().then_some(pattern));
-    };
-    // shortcut: one `*`, in the file name only; a full glob when a project needs one.
-    let parent = pattern.parent().unwrap_or(Path::new("."));
-    let mut hits: Vec<PathBuf> = std::fs::read_dir(parent)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            let n = p
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            p.is_file()
-                && n.len() >= pre.len() + post.len()
-                && n.starts_with(pre)
-                && n.ends_with(post)
-        })
-        .collect();
-    if hits.len() > 1 {
-        hits.retain(|p| migate_engine_sqlite::count_rows(p, history).is_ok());
-    }
-    match hits.len() {
-        0 => Ok(None),
-        1 => Ok(hits.pop()),
-        _ => Err(format!(
-            "the database pattern `{}` matches {} files holding a migration history; it must match one",
-            pattern.display(),
-            hits.len()
-        )),
-    }
 }
 
 // shortcut: commands run through `sh` with no time limit; Windows and a timeout when someone needs them.
