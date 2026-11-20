@@ -8,13 +8,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-migate-core = { path = "../core" }
+migate-core = { path = "../../core" }
 serde_json = "1"
 sha2 = "0.10"
 
 [dev-dependencies]
 # The integration tests find the server where the bundled tools.toml says package managers install it.
-migate-migrators = { path = "../migrators" }
+migate-migrators = { path = "../../migrators" }
 
 [lints]
 workspace = true

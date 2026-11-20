@@ -37,7 +37,7 @@ fn the_100_table_benchmark_has_the_expected_counts() {
     // Expected values were counted independently with the sqlite3 CLI on the same file (pragma_table_xinfo,
     // pragma_foreign_key_list, pragma_index_list and sqlite_schema): 100 tables, 1291 table columns, 197 foreign keys,
     // 200 explicit indexes, 5 triggers, 5 views; every table has a primary key and one CHECK.
-    let schema = include_str!("../../../docs/research/bench/stack/schema.sql");
+    let schema = include_str!("../../../../docs/research/bench/stack/schema.sql");
     let s = build(schema).snapshot().unwrap();
     let c = counts(&s);
     let expected = [
