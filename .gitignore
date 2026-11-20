@@ -5,3 +5,4 @@ dist/
 backlog/
 target/
 __pycache__/
+/mutants.out-dir/

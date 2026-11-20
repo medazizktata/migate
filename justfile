@@ -30,3 +30,7 @@ doctor:
     @cargo rustc -p migate-core --lib -q -- -V
     @cargo clippy --version
     @cargo fmt --version
+
+# Mutation testing on one crate (default migate-core); extra arguments go to cargo-mutants. See scripts/mutants.sh.
+mutants crate="migate-core" *args:
+    bash scripts/mutants.sh {{crate}} {{args}}
