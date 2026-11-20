@@ -44,9 +44,13 @@ impl Repo {
                 "core.hooksPath=/dev/null",
             ])
             .args(args)
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success(), "git {args:?}");
+        assert!(
+            status.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
     }
 
     fn write(&self, rel: &str, text: &str) {
@@ -980,7 +984,15 @@ fn a_run_cleans_up_what_a_killed_run_left_behind() {
     let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
     // What `kill -9` leaves: a run folder of a process that no longer exists, holding a registered worktree.
     let dead = 4_294_967; // above any pid_max
-    let left = std::env::temp_dir().join(format!("migate-run-{dead}-{}", std::process::id()));
+    // A temp folder of its own: every other test's run sweeps dead runs' folders out of the shared one, and could take
+    // this one before or while it is built.
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let own_tmp = std::env::temp_dir().join(format!("migate-sweep-test-{unique}"));
+    fs::create_dir_all(&own_tmp).unwrap();
+    let left = own_tmp.join(format!("migate-run-{dead}-1"));
     r.git(&[
         "worktree",
         "add",
@@ -990,7 +1002,7 @@ fn a_run_cleans_up_what_a_killed_run_left_behind() {
         "main",
     ]);
     assert_eq!(worktrees(&r), 2);
-    let (code, out, err) = sandbox_check(&r, &[]);
+    let (code, out, err) = sandbox_check(&r, &[("TMPDIR", &*own_tmp.to_string_lossy())]);
     assert_eq!(code, 0, "{out}{err}");
     assert!(!left.exists(), "the dead run's folder is still there");
     assert_eq!(worktrees(&r), 1);
