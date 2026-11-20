@@ -40,9 +40,9 @@ base = "origin/main"
 
 [sandbox]
 env = { DATABASE_URL = "file:{db}" }   # the variable your project reads; {db} is the throwaway database's path
-setup = "npm ci"                       # run in each checkout first
-seed = "npm run seed"                  # optional: rows, so a migration that loses rows or values is caught
-test = "npm test"                      # the base version's tests: run on base's own database, at head, and on an
+setup = "pnpm install --frozen-lockfile"   # run in each checkout first
+seed = "pnpm run seed"                 # optional: rows, so a migration that loses rows or values is caught
+test = "pnpm test"                     # the base version's tests: run on base's own database, at head, and on an
                                        # emptied copy, so a run that never used the database is "not checked"
 ```
 
@@ -64,7 +64,7 @@ there; it only needs the database's name from your wrangler configuration:
 migrator = "wrangler-d1"
 [sandbox]
 database_name = "app"
-test = "npm test"
+test = "pnpm test"
 ```
 
 For PostgreSQL, migate starts a throwaway server from the machine's own Postgres (found on PATH, in the usual install
@@ -74,7 +74,7 @@ folders, or at `MIGATE_PG_BIN`) and stops it when the run ends or is cancelled:
 [sandbox]
 engine = "postgres"
 env = { DATABASE_URL = "{url}" }   # postgresql://migate@127.0.0.1:<free port>/migate
-test = "npm test"
+test = "pnpm test"
 ```
 
 Migrate commands that use `npx` never download a package the project does not have.

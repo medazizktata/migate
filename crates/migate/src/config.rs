@@ -12,9 +12,9 @@
 //! env = { DATABASE_URL = "sqlite:///{db}" }   # how the project is told where the database is; {db} is its path
 //! database_name = "app"                        # Wrangler D1: the database's name in wrangler.toml
 //! shared = "apps/web/.wrangler"                # a database the project keeps inside its own checkout
-//! setup = "npm ci"                             # run in each checkout first (a fresh checkout has no dependencies)
-//! seed = "npm run seed"                        # optional: rows for the data-loss check
-//! test = "npm test"                            # the base version's tests, run against the migrated database
+//! setup = "pnpm install --frozen-lockfile"     # run in each checkout first (a fresh checkout has no dependencies)
+//! seed = "pnpm run seed"                       # optional: rows for the data-loss check
+//! test = "pnpm test"                           # the base version's tests, run against the migrated database
 //! ```
 
 use std::collections::BTreeMap;
