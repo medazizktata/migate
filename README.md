@@ -83,6 +83,23 @@ database_name = "app"
 test = "pnpm test"
 ```
 
+That is for Wrangler's own SQL migrations. An app whose ORM writes the migrations (Payload, Drizzle) and runs them on
+D1 names its ORM's migrator instead, and usually its own migrate script: the bundled Payload command,
+`npx --no payload migrate` at the repository root, finds nothing in a monorepo where Payload is installed in one app.
+This set-up ran on such an app (Payload on D1, pnpm workspaces):
+
+```toml
+migrator = "payload"
+out_of_order = "block"                 # when your own runner refuses a late migration
+[sandbox]
+shared = "apps/web/.wrangler"          # where the app keeps its local D1, inside the checkout
+database = "{dir}/shared/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite"
+migrate = "pnpm db:migrate"            # the project's own script, run at the repository root
+setup = "pnpm install --frozen-lockfile"
+seed = "pnpm run seed"                 # a suite that deletes its own rows leaves nothing to show lost data
+test = "pnpm --filter api test:int"
+```
+
 For PostgreSQL, migate starts a throwaway server from the machine's own Postgres (found on PATH, in the usual install
 folders, or at `MIGATE_PG_BIN`) and stops it when the run ends or is cancelled. Tested with PostgreSQL 15, 16, 17
 and 18:
