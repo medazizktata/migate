@@ -360,6 +360,11 @@ impl Snapshot {
         })
     }
 
+    /// The engine's own version, as the reader reported it.
+    pub fn engine_version(&self) -> Option<&str> {
+        self.engine_version.as_deref()
+    }
+
     pub fn engine(&self) -> &str {
         &self.engine
     }

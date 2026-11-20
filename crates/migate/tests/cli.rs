@@ -633,7 +633,9 @@ fn sandbox_without_tests_says_only_the_diff_judged() {
     let (code, out, err) = sandbox_check(&r, &[]);
     assert_eq!(code, 0, "{out}{err}");
     assert!(
-        out.contains("MG810") && out.contains("only the schema diff judged"),
+        out.contains("MG810")
+            && out.contains("only the schema diff judged")
+            && out.contains(", sandbox: sqlite 3."),
         "{out}"
     );
 }
@@ -1273,7 +1275,10 @@ fn postgres_sandbox_passes_a_safe_addition() {
     let (code, out, err) = sandbox_check(&r, &[]);
     assert_eq!(code, 0, "{out}{err}");
     assert!(
-        out.contains("MG210") && out.contains("public.users.nickname") && !out.contains("MG810"),
+        out.contains("MG210")
+            && out.contains("public.users.nickname")
+            && !out.contains("MG810")
+            && out.contains(", sandbox: postgres 1"),
         "{out}"
     );
 }

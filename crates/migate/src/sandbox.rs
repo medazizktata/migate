@@ -59,12 +59,13 @@ const PASSED_PREFIXES: [&str; 9] = [
     "COREPACK_",
 ];
 
+/// The findings, and which engine and version the throwaway database ran (`postgres 18.6`).
 pub fn run(
     cfg: &Sandbox,
     migrator: &Migrator,
     root: &Path,
     base: &str,
-) -> Result<Vec<Finding>, String> {
+) -> Result<(Vec<Finding>, String), String> {
     on_signals();
     let tmp = TempDir::create()?;
     sweep(root, &tmp.0);
@@ -325,7 +326,12 @@ pub fn run(
     let findings: Vec<Finding> = findings.into_iter().map(|f| place(f, &added)).collect();
     let mut findings = contract::apply(findings, &markers);
     findings.extend(bad_markers);
-    Ok(findings)
+    let engine = format!(
+        "{} {}",
+        before.engine(),
+        before.engine_version().unwrap_or("(version unknown)")
+    );
+    Ok((findings, engine))
 }
 
 /// Make `rel` in each checkout a link to one folder, so base and head migrate the same database.

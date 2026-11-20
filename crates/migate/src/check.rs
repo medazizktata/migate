@@ -124,11 +124,12 @@ pub fn check(args: &CheckArgs) -> Outcome {
     let result =
         settings(&args.common, args.base.as_ref()).and_then(|s| run_check(&s).map(|r| (s, r)));
     match result {
-        Ok((s, (findings, files, checked))) => {
+        Ok((s, (findings, files, checked, sandbox))) => {
             let cx = Context {
                 migrator: &s.migrator.id,
                 base: &s.base,
                 checked,
+                sandbox: sandbox.as_deref(),
                 files: &files,
                 ledger: &s.ledger,
             };
@@ -149,7 +150,13 @@ pub fn check(args: &CheckArgs) -> Outcome {
     }
 }
 
-type Checked = (Vec<Finding>, BTreeMap<String, String>, usize);
+/// Findings, each migration's file, how many migrations were read, and the sandbox's engine and version if one ran.
+type Checked = (
+    Vec<Finding>,
+    BTreeMap<String, String>,
+    usize,
+    Option<String>,
+);
 
 /// The findings, each migration's file, and how many migrations were read (so an empty pass is visible as one).
 fn run_check(s: &Settings) -> Result<Checked, String> {
@@ -190,15 +197,18 @@ fn run_check(s: &Settings) -> Result<Checked, String> {
         &applied,
     ));
 
+    let mut sandbox = None;
     if let Some(cfg) = &s.sandbox {
-        findings.extend(crate::sandbox::run(cfg, &s.migrator, &s.root, &s.base)?);
+        let (found, engine) = crate::sandbox::run(cfg, &s.migrator, &s.root, &s.base)?;
+        findings.extend(found);
+        sandbox = Some(engine);
     }
     let files = project
         .files
         .iter()
         .map(|f| (f.id.clone(), f.path.clone()))
         .collect();
-    Ok((findings, files, project.migrations.len()))
+    Ok((findings, files, project.migrations.len(), sandbox))
 }
 
 /// No migration found means nothing was checked: usually the wrong migrator, so name the ones whose layout matches.

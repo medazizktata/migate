@@ -19,6 +19,8 @@ pub struct Context<'a> {
     pub migrator: &'a str,
     pub base: &'a str,
     pub checked: usize,
+    /// The throwaway database's engine and version, when a sandbox ran (`postgres 18.6`).
+    pub sandbox: Option<&'a str>,
     /// Migration id -> its file, relative to the project; findings without one point at the ledger.
     pub files: &'a BTreeMap<String, String>,
     pub ledger: &'a str,
@@ -78,8 +80,11 @@ fn text(findings: &[Finding], cx: &Context) -> String {
     }
     let (e, w, n) = counts(findings);
     out.push_str(&format!(
-        "migate: {e} error(s), {w} warning(s), {n} note(s) in {} migration(s) (migrator: {}, base: {})\n",
-        cx.checked, cx.migrator, cx.base
+        "migate: {e} error(s), {w} warning(s), {n} note(s) in {} migration(s) (migrator: {}, base: {}{})\n",
+        cx.checked,
+        cx.migrator,
+        cx.base,
+        cx.sandbox.map_or(String::new(), |s| format!(", sandbox: {s}"))
     ));
     out
 }
@@ -92,6 +97,7 @@ fn json_report(findings: &[Finding], cx: &Context) -> Value {
         "migrator": cx.migrator,
         "base": cx.base,
         "checked": cx.checked,
+        "sandbox": cx.sandbox,
         "summary": { "errors": e, "warnings": w, "notes": n },
         "findings": sorted(findings).iter().map(|f| json!({
             "rule": f.rule,
