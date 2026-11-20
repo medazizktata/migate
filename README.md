@@ -46,6 +46,10 @@ test = "pnpm test"                     # the base version's tests: run on base's
                                        # emptied copy, so a run that never used the database is "not checked"
 ```
 
+The old version's tests are the primary check. When they pass against the migrated database (and are shown to have
+used it), a schema finding whose only risk is breaking the old version is reported as a warning, not an error; findings
+that can lose data stay errors. A constraint on a column the same change adds, empty in every existing row, is a note.
+
 An intended breaking change (the contract step of expand/contract) is accepted by a comment in the new migration, naming
 one rule and one object, with a reason:
 

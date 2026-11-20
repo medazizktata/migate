@@ -1674,3 +1674,28 @@ fn an_interrupt_while_the_server_starts_stops_it() {
     }
     assert!(!alive, "the starting server outlived the interrupt");
 }
+
+const AUDIT_TRIGGER: &str = "CREATE TABLE audit (at TEXT);
+CREATE TRIGGER users_audit AFTER INSERT ON users BEGIN INSERT INTO audit VALUES (datetime('now')); END;";
+
+#[test]
+fn a_change_the_old_versions_tests_vouch_for_is_a_warning_not_an_error() {
+    // An added trigger can reject old writes (MG503); the old version's tests ran against it, proved they used the
+    // database, and passed, so the primary check has judged exactly that risk.
+    let r = sandbox_repo(SANDBOX_TOML, AUDIT_TRIGGER);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("warning MG503") && out.contains("the base version's tests passed"),
+        "{out}"
+    );
+}
+
+#[test]
+fn without_tests_the_schema_rule_still_decides() {
+    let no_test = SANDBOX_TOML.replace("test = \"python3 old_app.py\"\n", "");
+    let r = sandbox_repo(&no_test, AUDIT_TRIGGER);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("error   MG503"), "{out}");
+}
