@@ -72,7 +72,8 @@ test = "pnpm test"
 ```
 
 For PostgreSQL, migate starts a throwaway server from the machine's own Postgres (found on PATH, in the usual install
-folders, or at `MIGATE_PG_BIN`) and stops it when the run ends or is cancelled:
+folders, or at `MIGATE_PG_BIN`) and stops it when the run ends or is cancelled. Tested with PostgreSQL 15, 16, 17
+and 18:
 
 ```toml
 [sandbox]
