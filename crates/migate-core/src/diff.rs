@@ -70,6 +70,12 @@ pub fn diff<'a>(base: &'a Snapshot, head: &'a Snapshot) -> Vec<Change<'a>> {
 /// The findings for a list of changes. Objects inside a table that was itself added or dropped are not reported again:
 /// a new table has no running code to break, and a dropped one is already an error.
 pub fn classify(changes: &[Change]) -> Vec<Finding> {
+    classify_with(changes, &BTreeSet::new())
+}
+
+/// [`classify`], knowing which columns (`namespace.table.column`) hold values after the migration: a new column the
+/// migration backfilled is not empty, so a constraint on it can fail on production rows.
+pub fn classify_with(changes: &[Change], filled: &BTreeSet<String>) -> Vec<Finding> {
     let whole: BTreeSet<(&str, &str)> = changes
         .iter()
         .filter_map(|c| match c {
@@ -86,7 +92,10 @@ pub fn classify(changes: &[Change]) -> Vec<Finding> {
         .filter_map(|c| match c {
             Change::Added(o) => match (&o.detail, &o.parent) {
                 (Detail::Column(col), Some(table))
-                    if col.default.is_none() && col.generated.is_none() && !col.identity =>
+                    if col.default.is_none()
+                        && col.generated.is_none()
+                        && !col.identity
+                        && !filled.contains(&format!("{}.{table}.{}", o.namespace, o.name)) =>
                 {
                     Some((o.namespace.as_str(), table.as_str(), o.name.as_str()))
                 }

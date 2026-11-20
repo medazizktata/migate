@@ -17,7 +17,7 @@ use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 
 use migate_core::contract;
-use migate_core::diff::{classify, diff};
+use migate_core::diff::{classify_with, diff};
 use migate_core::engine;
 use migate_core::rules::rule;
 use migate_core::{Finding, Severity};
@@ -273,7 +273,13 @@ pub fn run(
             ),
         ));
     }
-    findings.extend(classify(&diff(&before, &after)));
+    let values_after = db.value_counts()?;
+    let filled = values_after
+        .iter()
+        .filter(|(_, n)| **n > 0)
+        .map(|(k, _)| k.clone())
+        .collect();
+    findings.extend(classify_with(&diff(&before, &after), &filled));
     let unmodelled_after = db.unmodelled()?;
     for key in unmodelled_before
         .keys()
@@ -308,9 +314,9 @@ pub fn run(
         }
     }
     // Values a migration blanked without losing a row; a table that lost rows is already reported.
-    for (column, now) in db.value_counts()? {
+    for (column, &now) in &values_after {
         let table = column.rsplit_once('.').map_or(column.as_str(), |(t, _)| t);
-        if let Some(&was) = values_before.get(&column)
+        if let Some(&was) = values_before.get(column)
             && now < was
             && !lost_rows.contains(table)
         {

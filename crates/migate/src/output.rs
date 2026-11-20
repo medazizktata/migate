@@ -81,6 +81,13 @@ fn text(findings: &[Finding], cx: &Context) -> String {
         ));
     }
     let (e, w, n) = counts(findings);
+    // stderr carries the reason; stdout alone must not read as a clean pass.
+    if let Some(why) = cx.not_checked {
+        out.push_str(&format!(
+            "migate: could not check, so this is not a pass: {}\n",
+            why.lines().next().unwrap_or("")
+        ));
+    }
     out.push_str(&format!(
         "migate: {e} error(s), {w} warning(s), {n} note(s) in {} migration(s) (migrator: {}, base: {}{})\n",
         cx.checked,

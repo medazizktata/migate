@@ -1481,7 +1481,10 @@ fn findings_the_sandbox_did_not_need_survive_when_it_cannot_check() {
     let r = late_migration_repo(&stub);
     let (code, out, err) = sandbox_check(&r, &[]);
     assert_eq!(code, 3, "{out}{err}");
-    assert!(out.contains("warning MG004"), "{out}");
+    assert!(
+        out.contains("warning MG004") && out.contains("could not check, so this is not a pass"),
+        "{out}"
+    );
     let json = Command::new(env!("CARGO_BIN_EXE_migate"))
         .current_dir(&r.dir)
         .args(["check", "--format", "json"])
@@ -1742,4 +1745,28 @@ fn postgres_says_what_it_did_not_check() {
         out.contains("MG801") && out.contains("policy public.users.none_for_you"),
         "{out}{err}"
     );
+}
+
+#[test]
+fn postgres_counts_values_in_a_table_wider_than_fifty_columns() {
+    // Postgres functions take at most 100 arguments; a count per column must not become one call's arguments.
+    let cols: Vec<String> = (0..62).map(|i| format!("c{i} text")).collect();
+    let r = pg_repo(&format!("create table wide ({});", cols.join(", ")));
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+}
+
+#[test]
+fn a_constraint_on_a_new_column_the_migration_fills_stays_an_error() {
+    // The column is new, but the migration backfills it: production rows can collide under the UNIQUE index.
+    let seeded = SANDBOX_TOML
+        .replace("test = \"python3 old_app.py\"\n", "")
+        .replace("[sandbox]\n", "[sandbox]\nseed = \"python3 seed.py\"\n");
+    let r = sandbox_repo(
+        &seeded,
+        "ALTER TABLE users ADD COLUMN slug TEXT;\nUPDATE users SET slug = lower(email);\nCREATE UNIQUE INDEX users_slug ON users (slug);",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("error   MG302"), "{out}");
 }
