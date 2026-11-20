@@ -47,7 +47,7 @@ case "$mode" in
         echo "$addr" | grep -q -E "$noreply" || fail "commit $(git rev-parse --short "$c") carries $addr, not a GitHub noreply address"
       done
     done <<< "$commits"
-    added="$(git log --no-color -p -U0 --format='%B' "${revs[@]}" | grep -v -E '^(\+\+\+|---) ' | grep -v -E '^-' || true)"
+    added="$(git log --no-color -p -U0 --format='%B' "${revs[@]}" | grep -v -E '^(\+\+\+|---) ' | grep -v -E '^(-|@@ )' || true)"  # a hunk header quotes old text
     files="$(git log --format= --name-only --diff-filter=AR "${revs[@]}" | sort -u)"
     gitleaks git --log-opts="${revs[*]}" --no-banner --redact . >&2 || fail "gitleaks found a secret in the commits"
     ;;
