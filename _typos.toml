@@ -2,11 +2,11 @@
 [default.extend-words]
 iif = "iif"  # SQLite's iif() function
 migate = "migate"   # the project's name, not a misspelling of "migrate"
-# Deliberate misspellings in crates/migate-core/src/schema.rs tests, proving a reader's typo is refused.
+# Deliberate misspellings in crates/core/src/schema.rs tests, proving a reader's typo is refused.
 defualt = "defualt"
 predicat = "predicat"
 tabel = "tabel"
-postgress = "postgress"   # crates/migate/tests/cli.rs: an engine name typo must be refused
+postgress = "postgress"   # crates/cli/tests/cli.rs: an engine name typo must be refused
 doub = "doub"   # SQLite's type-affinity rule: a declared type containing "DOUB" is REAL
 
 [files]
