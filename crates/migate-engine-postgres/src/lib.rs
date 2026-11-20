@@ -53,6 +53,8 @@ impl Server {
         let bin = bindir()?;
         let data = dir.join("pgdata");
         let out = Command::new(bin.join("initdb"))
+            .env_clear()
+            .env("LC_ALL", "C")
             .args([
                 "-D",
                 &data.to_string_lossy(),
@@ -74,6 +76,9 @@ impl Server {
         }
         let port = free_port()?;
         let child = Command::new(bin.join("postgres"))
+            .env_clear()
+            // macOS refuses to start a postmaster with no locale set ("became multithreaded during startup").
+            .env("LC_ALL", "C")
             .args(["-D", &data.to_string_lossy(), "-p", &port.to_string()])
             // TCP only: a Unix socket under the run's folder can pass the OS path limit (about 103 bytes on macOS)
             // when TMPDIR is long, and then the server never starts.
@@ -389,7 +394,11 @@ fn psql(bin: &Path, url: &str, sql: &str) -> Result<String, String> {
             "-c",
             sql,
         ])
+        // Nothing from the caller's environment: a PGSSLMODE or PGDATABASE meant for a real database would point
+        // these calls elsewhere or make them fail.
+        .env_clear()
         .env("PGCONNECT_TIMEOUT", "5")
+        .env("PGCLIENTENCODING", "UTF8")
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("cannot run psql: {e}"))?;

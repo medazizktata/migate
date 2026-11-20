@@ -1558,3 +1558,18 @@ insert into users (email, legacy) values ('a@b', 'kept');",
         "{out}"
     );
 }
+
+#[test]
+fn postgres_settings_in_the_callers_environment_do_not_reach_the_server() {
+    // A developer's shell or CI may set these for their real database; the throwaway server must not inherit them.
+    let r = pg_repo("alter table users add column nickname text;");
+    let (code, out, err) = sandbox_check(
+        &r,
+        &[
+            ("PGSSLMODE", "require"),
+            ("PGDATABASE", "production"),
+            ("PGUSER", "admin"),
+        ],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+}
