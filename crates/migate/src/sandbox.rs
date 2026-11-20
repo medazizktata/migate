@@ -19,7 +19,6 @@ use signal_hook::iterator::Signals;
 use migate_core::contract;
 use migate_core::diff::{classify_with, diff};
 use migate_core::engine;
-use migate_core::rules::rule;
 use migate_core::{Finding, Severity};
 use migate_migrators::Migrator;
 
@@ -329,8 +328,6 @@ pub fn run(
         }
     }
 
-    // Set once the base version's tests passed on the migrated database and proved they used it.
-    let mut vouched = false;
     match (&cfg.test, migrated) {
         (Some(test), true) => {
             let recorded = db.count_rows(history)?;
@@ -367,7 +364,6 @@ pub fn run(
                         .into(),
                 ));
                 }
-                vouched = true;
             }
         }
         (None, _) => findings.push(Finding::new(
@@ -377,19 +373,6 @@ pub fn run(
             "not run: no `test` under [sandbox], so only the schema diff judged this change",
         )),
         (Some(_), false) => {}
-    }
-    if vouched {
-        // The mixed-version test is the primary check: where it ran and passed, a schema rule whose only error-level
-        // risk is breaking the old version has been judged by it, so it becomes a warning. Data-loss rules stay errors.
-        for f in &mut findings {
-            let axes = rule(f.rule).map_or("", |r| r.axes);
-            if f.severity == Severity::Error && axes.contains('B') && !axes.contains('D') {
-                f.severity = Severity::Warning;
-                f.message.push_str(
-                    " (a warning: the base version's tests passed against the migrated database)",
-                );
-            }
-        }
     }
     let findings: Vec<Finding> = findings.into_iter().map(|f| place(f, &added)).collect();
     let mut findings = contract::apply(findings, &markers);

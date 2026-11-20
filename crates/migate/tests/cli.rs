@@ -1682,19 +1682,6 @@ const AUDIT_TRIGGER: &str = "CREATE TABLE audit (at TEXT);
 CREATE TRIGGER users_audit AFTER INSERT ON users BEGIN INSERT INTO audit VALUES (datetime('now')); END;";
 
 #[test]
-fn a_change_the_old_versions_tests_vouch_for_is_a_warning_not_an_error() {
-    // An added trigger can reject old writes (MG503); the old version's tests ran against it, proved they used the
-    // database, and passed, so the primary check has judged exactly that risk.
-    let r = sandbox_repo(SANDBOX_TOML, AUDIT_TRIGGER);
-    let (code, out, err) = sandbox_check(&r, &[]);
-    assert_eq!(code, 0, "{out}{err}");
-    assert!(
-        out.contains("warning MG503") && out.contains("the base version's tests passed"),
-        "{out}"
-    );
-}
-
-#[test]
 fn without_tests_the_schema_rule_still_decides() {
     let no_test = SANDBOX_TOML.replace("test = \"python3 old_app.py\"\n", "");
     let r = sandbox_repo(&no_test, AUDIT_TRIGGER);
@@ -1769,4 +1756,21 @@ fn a_constraint_on_a_new_column_the_migration_fills_stays_an_error() {
     let (code, out, err) = sandbox_check(&r, &[]);
     assert_eq!(code, 2, "{out}{err}");
     assert!(out.contains("error   MG302"), "{out}");
+}
+
+#[test]
+fn a_suite_that_only_reads_does_not_vouch_for_a_trigger_that_rejects_writes() {
+    // The old app writes users in production; its tests only read them. Passing tests cannot clear this trigger.
+    const READS_ONLY: &str = r#"import os, sqlite3
+con = sqlite3.connect(os.environ["D1_PATH"])
+print(con.execute("SELECT id, email, legacy FROM users").fetchall())
+"#;
+    let r = sandbox_repo_with(
+        SANDBOX_TOML,
+        READS_ONLY,
+        "CREATE TRIGGER no_new_users BEFORE INSERT ON users BEGIN SELECT RAISE(ABORT, 'closed'); END;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("error   MG503"), "{out}");
 }
