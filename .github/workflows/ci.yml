@@ -48,3 +48,46 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # `+1.89` beats rust-toolchain.toml; without it this job would silently check with the pinned 1.93.1.
       - run: cargo +1.89 check --workspace --all-targets --locked
+
+  sensitive:
+    # The owner's private names are checked locally (.git/info/sensitive-patterns); CI checks the generic rules, so a
+    # push made with --no-verify is still caught.
+    name: nothing sensitive in the history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: install gitleaks 8.30.1 (checksum verified)
+        run: |
+          curl -sSfL -o /tmp/gl.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gl.tgz" | sha256sum -c -
+          tar -xzf /tmp/gl.tgz -C /usr/local/bin gitleaks
+      - run: bash scripts/check-sensitive.sh all
+
+  postgres:
+    name: PostgreSQL ${{ matrix.pg }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: [15, 16, 17, 18]
+    env:
+      PG: ${{ matrix.pg }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: "1.93.1" # keep equal to rust-toolchain.toml
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: install PostgreSQL from the PostgreSQL project's apt repository
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q "postgresql-$PG"
+      - name: engine and sandbox tests on that server
+        run: MIGATE_PG_BIN="/usr/lib/postgresql/$PG/bin" cargo test -p migate-engine-postgres -p migate --locked
