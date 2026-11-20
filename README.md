@@ -23,6 +23,16 @@ Licence: Apache-2.0 (`LICENSE`). Start here:
 - `docs/research/first-pass.md`: the first round (landscape, 21 migrators' history tables), with corrections at the top.
 - `docs/transcript.md`: the conversation this project came from, with the first round's research reports in full.
 
+## Install
+
+From a clone, on macOS or Linux, with Rust 1.89 or newer:
+
+```sh
+cargo install --locked --path crates/cli
+```
+
+This puts `migate` in `~/.cargo/bin`. Each GitHub release also carries a Linux binary.
+
 ## Use
 
 ```sh
