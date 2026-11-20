@@ -147,9 +147,14 @@ pub fn run(
             "migate: note: uncommitted changes are not part of the sandbox run, which uses HEAD"
         );
     }
-    let base_co = Checkout::add(root, base, &tmp.0.join("base"))?;
-    let head_co = Checkout::add(root, "HEAD", &tmp.0.join("head"))?;
-    let (base_dir, head_dir) = (base_co.0.join(prefix.trim()), head_co.0.join(prefix.trim()));
+    let checkouts = Checkouts(
+        Checkout::add(root, base, &tmp.0.join("base"))?,
+        Checkout::add(root, "HEAD", &tmp.0.join("head"))?,
+    );
+    let (base_dir, head_dir) = (
+        checkouts.0.0.join(prefix.trim()),
+        checkouts.1.0.join(prefix.trim()),
+    );
 
     // The migrations this change adds: where findings point, and the only place contract markers count (an old marker
     // would otherwise accept future changes).
@@ -1055,6 +1060,25 @@ impl Drop for Checkout {
         let mut l = live();
         remove_worktree(&self.1, &self.0);
         l.worktrees.retain(|w| w.0 != self.0);
+    }
+}
+
+/// The base and head checkouts, removed together: both trees (mostly installed dependencies, the largest share of a
+/// run's cleanup) are deleted at the same time, as plain folders with no git involved, then each checkout's own drop
+/// finds its tree gone and has git prune the record.
+#[derive(Debug)]
+struct Checkouts(Checkout, Checkout);
+
+impl Drop for Checkouts {
+    fn drop(&mut self) {
+        let _held = live(); // as for every removal: an interrupt waits, never races it
+        std::thread::scope(|s| {
+            for tree in [&self.0.0, &self.1.0] {
+                s.spawn(move || {
+                    let _ = std::fs::remove_dir_all(tree);
+                });
+            }
+        });
     }
 }
 
