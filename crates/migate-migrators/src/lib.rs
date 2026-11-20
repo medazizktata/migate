@@ -74,6 +74,9 @@ pub enum HistoryKind {
 pub struct History {
     pub kind: HistoryKind,
     pub query: String,
+    /// The same query where Postgres keeps the history elsewhere (Drizzle uses its own schema); `query` otherwise.
+    #[serde(default)]
+    pub postgres: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

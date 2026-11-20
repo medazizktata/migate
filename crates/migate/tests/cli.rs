@@ -1385,3 +1385,49 @@ fn the_next_run_stops_the_server_a_killed_run_left() {
     );
     let _ = fs::remove_dir_all(&own_tmp);
 }
+
+#[test]
+fn drizzle_on_postgres_keeps_its_history_in_its_own_schema() {
+    // Like drizzle-kit on Postgres: applied migrations are recorded in drizzle.__drizzle_migrations.
+    let apply = r#"set -e
+q() { psql -X -q -v ON_ERROR_STOP=1 -d "$DATABASE_URL" "$@"; }
+q -c "create schema if not exists drizzle" -c "create table if not exists drizzle.__drizzle_migrations (id serial primary key, hash text unique, created_at bigint)"
+i=0
+for f in drizzle/*.sql; do
+  i=$((i + 1)); n=$(basename "$f")
+  [ -n "$(psql -X -A -t -d "$DATABASE_URL" -c "select 1 from drizzle.__drizzle_migrations where hash = '$n'")" ] && continue
+  q -f "$f"
+  q -c "insert into drizzle.__drizzle_migrations (hash, created_at) values ('$n', 1700000000000 + $i)"
+done
+"#;
+    let journal = |entries: &str| {
+        format!(r#"{{"version":"7","dialect":"postgresql","entries":[{entries}]}}"#)
+    };
+    let first =
+        r#"{"idx":0,"version":"7","when":1700000000000,"tag":"0000_init","breakpoints":true}"#;
+    let second =
+        r#"{"idx":1,"version":"7","when":1700000500000,"tag":"0001_drop","breakpoints":true}"#;
+    let r = Repo::new();
+    r.write("migate.toml", &PG_TOML.replace("wrangler-d1", "drizzle"));
+    r.write("apply.sh", apply);
+    r.write("old_app.sh", PG_OLD_APP);
+    r.write("drizzle/meta/_journal.json", &journal(first));
+    r.write(
+        "drizzle/0000_init.sql",
+        "create table users (id serial primary key, email text not null, legacy text);",
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write(
+        "drizzle/meta/_journal.json",
+        &journal(&format!("{first},{second}")),
+    );
+    r.write(
+        "drizzle/0001_drop.sql",
+        "alter table users drop column legacy;",
+    );
+    r.commit("drop");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("MG201") && out.contains("MG810"), "{out}");
+}

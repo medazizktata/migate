@@ -71,6 +71,15 @@ pub fn run(
     let dir = tmp.0.join("db");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = cfg.database_name.clone().unwrap_or_default();
+    // Where the migrator records what ran, on this engine.
+    let history = match cfg.engine {
+        Engine::Postgres => migrator
+            .history
+            .postgres
+            .as_deref()
+            .unwrap_or(&migrator.history.query),
+        Engine::Sqlite => &migrator.history.query,
+    };
     // The migrator's location goes with its own command; a project that replaces the command says where it writes.
     let tool_location = migrator
         .migrate
@@ -200,13 +209,11 @@ pub fn run(
              --persist-to), and that [sandbox] database names the file it writes"
         )
     };
-    let db = sandbox
-        .open(&migrator.history.query)
-        .map_err(not_migrated)?;
+    let db = sandbox.open(history).map_err(not_migrated)?;
     let ran = project::read(&base_dir, migrator)?.migrations.len();
     if ran > 0 {
         let rows = db
-            .count_rows(&migrator.history.query)
+            .count_rows(history)
             .map_err(|e| not_migrated(format!("its migration history cannot be read ({e})")))?;
         if rows == 0 {
             return Err(not_migrated(format!(
@@ -271,7 +278,7 @@ pub fn run(
 
     match (&cfg.test, migrated) {
         (Some(test), true) => {
-            let history = db.count_rows(&migrator.history.query)?;
+            let recorded = db.count_rows(history)?;
             eprintln!("migate: running the base version's tests against it");
             let out = sh(&vars(test), &base_dir, &env)?;
             if !out.status.success() {
@@ -288,14 +295,14 @@ pub fn run(
             } else {
                 // Calibration, after a pass: the database must still be the migrated one, and the tests must notice
                 // when its tables are gone.
-                let still = db.count_rows(&migrator.history.query).unwrap_or(0);
-                if still < history {
+                let still = db.count_rows(history).unwrap_or(0);
+                if still < recorded {
                     return Err(invalid(format!(
-                        "the migration history went from {history} rows to {still} during the tests: they rebuilt the \
+                        "the migration history went from {recorded} rows to {still} during the tests: they rebuilt the \
                      database instead of using the migrated one"
                     )));
                 }
-                db.drop_all_but(&migrator.history.query)?;
+                db.drop_all_but(history)?;
                 eprintln!("migate: checking the tests notice a database with its tables dropped");
                 if sh(&vars(test), &base_dir, &env)?.status.success() {
                     return Err(invalid(

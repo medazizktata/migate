@@ -15,6 +15,7 @@ checksum = "none"
 kind = "full"
 # Postgres keeps it in the drizzle schema (drizzle.__drizzle_migrations); SQLite and D1 in the main database.
 query = "SELECT created_at FROM __drizzle_migrations ORDER BY created_at"
+postgres = "SELECT created_at FROM drizzle.__drizzle_migrations ORDER BY created_at"
 
 [migrate]
 # --no: never download a package the project does not have.
