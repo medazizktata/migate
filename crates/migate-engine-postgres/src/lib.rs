@@ -52,8 +52,6 @@ impl Server {
     pub fn start(dir: &Path) -> Result<Server, String> {
         let bin = bindir()?;
         let data = dir.join("pgdata");
-        let socket = dir.join("pgsock");
-        std::fs::create_dir_all(&socket).map_err(|e| format!("{}: {e}", socket.display()))?;
         let out = Command::new(bin.join("initdb"))
             .args([
                 "-D",
@@ -76,14 +74,10 @@ impl Server {
         }
         let port = free_port()?;
         let child = Command::new(bin.join("postgres"))
-            .args([
-                "-D",
-                &data.to_string_lossy(),
-                "-p",
-                &port.to_string(),
-                "-k",
-                &socket.to_string_lossy(),
-            ])
+            .args(["-D", &data.to_string_lossy(), "-p", &port.to_string()])
+            // TCP only: a Unix socket under the run's folder can pass the OS path limit (about 103 bytes on macOS)
+            // when TMPDIR is long, and then the server never starts.
+            .args(["-c", "unix_socket_directories="])
             // Throwaway data: durability settings only cost time.
             .args([
                 "-c",
