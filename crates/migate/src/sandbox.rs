@@ -222,8 +222,11 @@ pub fn run(
     eprintln!("migate: migrating a throwaway database to {base}");
     let out = sh(&migrate, &base_dir, &migrate_env)?;
     if !out.status.success() {
+        // Its own output says why: a migration failing on an empty database, or a command that cannot run here (a tool
+        // not installed where it runs, the wrong folder). Naming one cause would mislead on the other.
         return Err(format!(
-            "the base migrations fail on an empty database, so nothing was checked:\n{}",
+            "the migrate command failed at {base}, before anything could be checked (`{migrate}`, run at the \
+             repository root):\n{}",
             tail(&out)
         ));
     }

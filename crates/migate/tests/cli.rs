@@ -2356,3 +2356,22 @@ fn a_trigger_error_prints_the_marker_that_accepts_it() {
         "{out}"
     );
 }
+
+#[test]
+fn a_migrate_command_that_cannot_run_is_reported_as_itself() {
+    // The dogfood's case: the tool is not installed where the command runs. Nothing says the database was at fault.
+    let broken = SANDBOX_TOML.replace(
+        "migrate = \"python3 apply.py\"",
+        "migrate = \"echo 'npx canceled due to missing packages' >&2; exit 1\"",
+    );
+    let r = sandbox_repo(&broken, "SELECT 1;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("the migrate command failed at main")
+            && err.contains("npx canceled due to missing packages")
+            && err.contains("exit 1")
+            && !err.contains("empty database"),
+        "{err}"
+    );
+}
