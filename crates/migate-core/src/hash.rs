@@ -194,12 +194,9 @@ fn string_end(c: &[char], i: usize, lang: Lang) -> Option<usize> {
             j += 2;
             continue;
         }
+        // A doubled quote (SQL's escape) needs no case of its own: ending the string there and starting the next one
+        // at once keeps the same characters inside strings.
         if c[j] == quote {
-            // SQL escapes a quote by doubling it.
-            if lang == Lang::Sql && c.get(j + 1) == Some(&quote) {
-                j += 2;
-                continue;
-            }
             return Some(j + 1);
         }
         j += 1;

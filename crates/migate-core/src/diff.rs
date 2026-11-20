@@ -1028,12 +1028,14 @@ mod tests {
                 columns: vec!["owner".into()],
             },
         ));
+        head.push(on_t("t_owner_idx", index(true, &["owner"])));
         assert_eq!(
             found(head),
             [
                 ("MG210", Severity::Note),
                 ("MG302", Severity::Note),
-                ("MG303", Severity::Note)
+                ("MG303", Severity::Note),
+                ("MG302", Severity::Note)
             ]
         );
         // A new column with a default fills every existing row with one value: UNIQUE or the reference can fail.

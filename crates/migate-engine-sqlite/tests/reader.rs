@@ -91,6 +91,7 @@ CREATE TRIGGER live_posts_insert INSTEAD OF INSERT ON live_posts BEGIN SELECT 1;
 #[test]
 fn columns_keep_types_generation_collation_and_identity() {
     let s = build(RICH).snapshot().unwrap();
+    assert_eq!(s.engine_version(), Some(rusqlite::version()));
     let col = |table: &str, name: &str| match &get(&s, Kind::Column, Some(table), name).detail {
         Detail::Column(c) => c.clone(),
         other => panic!("{other:?}"),

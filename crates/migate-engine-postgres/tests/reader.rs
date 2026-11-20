@@ -101,6 +101,11 @@ fn every_kind_is_read_from_a_real_server() {
     psql(&server, SCHEMA);
     let s = server.snapshot().unwrap();
     assert_eq!(s.engine(), "postgres");
+    let version = s.engine_version().unwrap();
+    assert!(
+        version.split('.').next().unwrap().parse::<u32>().unwrap() >= 15,
+        "{version}"
+    );
 
     let id = col(&s, "users", "id");
     assert!(id.identity && !id.nullable);

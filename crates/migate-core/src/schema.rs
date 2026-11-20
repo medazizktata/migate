@@ -554,9 +554,12 @@ mod tests {
         }
     }
 
-    fn round_trip(text: &str, engine: &str, kinds: usize) {
+    fn round_trip(text: &str, engine: &str, version: &str, kinds: usize) {
         let first: Snapshot = serde_json::from_str(text).unwrap();
-        assert_eq!(first.engine(), engine);
+        assert_eq!(
+            (first.engine(), first.engine_version()),
+            (engine, Some(version))
+        );
         let seen: BTreeSet<Kind> = first.objects().iter().map(Object::kind).collect();
         assert_eq!(seen.len(), kinds, "the fixture exercises {kinds} kinds");
         let json = serde_json::to_string_pretty(&first).unwrap();
@@ -571,12 +574,12 @@ mod tests {
 
     #[test]
     fn the_sqlite_fixture_round_trips() {
-        round_trip(SQLITE, "sqlite", 9);
+        round_trip(SQLITE, "sqlite", "3.53.4", 9);
     }
 
     #[test]
     fn the_postgres_fixture_round_trips() {
-        round_trip(POSTGRES, "postgres", 13);
+        round_trip(POSTGRES, "postgres", "18.6", 13);
     }
 
     fn generated_schema() -> String {
