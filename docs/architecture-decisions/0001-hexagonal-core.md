@@ -17,7 +17,10 @@ the file system and the teams' own test commands are slow, varied and hard to fa
 2. **Ports and adapters at the edges.** Everything that touches the world (files, git, databases, sandboxes, hosts, test
    runners, reporters) lives in other crates, behind a trait (a port) when, and only when, there are two real
    implementations or a test needs a stand-in.
-3. **Migration tools are data, not adapters.** Each is a TOML file in `migate-migrators`; one interpreter reads them all.
+3. **Migration tools are data, not adapters.** Each is a TOML file in `migate-migrators`; one interpreter reads them all. So is
+   what migate knows about the other tools a project's commands run (variables to pass or set, folders to skip, a
+   package manager's noise lines, a host's internal tables): `migate-migrators/tools.toml`. The runner reads it and
+   names no tool; the only tool-specific code is an engine finding its own server programs.
    A new migration tool should be a new file; code changes only for a new order model or file layout.
 4. **The CLI is the composition root.** `migate` reads configuration, picks the adapters and wires them to the core.
    No other crate decides which adapter to use.

@@ -360,6 +360,13 @@ impl Snapshot {
         })
     }
 
+    /// The same snapshot with only the objects `keep` accepts (removing a table and its columns, indexes and triggers
+    /// keeps every remaining key unique and every parent present).
+    pub fn retain(mut self, keep: impl FnMut(&Object) -> bool) -> Snapshot {
+        self.objects.retain(keep);
+        self
+    }
+
     /// The engine's own version, as the reader reported it.
     pub fn engine_version(&self) -> Option<&str> {
         self.engine_version.as_deref()

@@ -2707,3 +2707,58 @@ ALTER TABLE users_new RENAME TO users;";
     assert_eq!(code, 2, "{out}{err}");
     assert!(out.contains("error   MG106  main.posts.user_id"), "{out}");
 }
+
+#[test]
+fn a_hosts_own_table_is_neither_schema_nor_data() {
+    // Cloudflare D1 keeps _cf_KV in every database for itself (listed in tools.toml); what happens to it is not the
+    // project's change.
+    let r = sandbox_repo_full(
+        &without_tests(),
+        OLD_APP,
+        &format!(
+            "{INIT}\nCREATE TABLE _cf_KV (key TEXT PRIMARY KEY, value BLOB);\nINSERT INTO _cf_KV VALUES ('k', 'v');"
+        ),
+        "DELETE FROM _cf_KV;\nALTER TABLE _cf_KV ADD COLUMN extra TEXT;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert!(!out.contains("_cf_KV"), "{out}{err}");
+    assert_ne!(code, 2, "{out}{err}");
+}
+
+#[test]
+fn a_tools_folder_is_never_searched_for_migrations() {
+    // A dependency shipping its own migrations, committed (so git does not ignore it): not the project's.
+    let r = Repo::new();
+    r.write("migrations/0001_init.sql", "CREATE TABLE t (a);");
+    r.write(
+        "node_modules/some-dep/migrations/0002_dep.sql",
+        "CREATE TABLE dep (a);",
+    );
+    r.commit("init");
+    let out = r.migate(&["check", "--migrator", "wrangler-d1", "--base", "HEAD"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("in 1 migration(s)"),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn a_language_managers_variables_reach_the_sandbox_and_others_do_not() {
+    let seen = std::env::temp_dir().join(format!("migate-pass-seen-{}", std::process::id()));
+    let probe = format!(
+        "migrate = 'printf \"%s|%s\" \"$GEM_HOME\" \"$UNLISTED_SETTING\" > {}; python3 apply.py'",
+        seen.display()
+    );
+    let r = sandbox_repo(
+        &SANDBOX_TOML.replace("migrate = \"python3 apply.py\"", &probe),
+        "SELECT 1;",
+    );
+    let (code, out, err) = sandbox_check(
+        &r,
+        &[("GEM_HOME", "/gems/here"), ("UNLISTED_SETTING", "leaked")],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(fs::read_to_string(&seen).unwrap(), "/gems/here|");
+}

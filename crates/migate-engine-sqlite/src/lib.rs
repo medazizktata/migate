@@ -291,7 +291,7 @@ fn read_namespace(conn: &Connection, ns: &str, objects: &mut Vec<Object>) -> Res
 
     let mut stmt = conn.prepare(&format!(
         "SELECT type, name, tbl_name, coalesce(sql, '') FROM {}.sqlite_schema \
-         WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name <> '_cf_KV' ORDER BY type, name",
+         WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY type, name",
         quoted(ns)
     ))?;
     let rows: Vec<(String, String, String, String)> = stmt

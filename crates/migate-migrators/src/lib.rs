@@ -268,6 +268,34 @@ impl Migrator {
     }
 }
 
+/// What migate knows about the tools a project's commands run (`tools.toml`). The runner reads it and names no tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tools {
+    /// Variables passed through to sandbox commands, besides the operating system's own.
+    pub pass_env: Vec<String>,
+    pub pass_env_prefixes: Vec<String>,
+    /// Folders never searched for migrations.
+    pub skip_dirs: Vec<String>,
+    /// Marks before a passing or skipped test.
+    pub test_marks: Vec<String>,
+    /// A package manager's own lines about a command it wrapped failing.
+    pub wrapper_lines: Vec<String>,
+    /// Tables a host keeps in every database for itself.
+    pub internal_tables: Vec<String>,
+    /// Variables set for every sandbox command (`{dir}` is the run's database folder); the project's own values win.
+    pub env: BTreeMap<String, String>,
+}
+
+/// The bundled `tools.toml`, parsed once. It ships inside the binary and a test parses it, so a failure here is a
+/// build mistake, not an input error.
+pub fn tools() -> &'static Tools {
+    static TOOLS: std::sync::OnceLock<Tools> = std::sync::OnceLock::new();
+    TOOLS.get_or_init(|| {
+        toml::from_str(include_str!("../tools.toml")).expect("the bundled tools.toml parses")
+    })
+}
+
 /// Every bundled migrator.
 pub fn bundled() -> Result<Vec<Migrator>, Error> {
     BUNDLED
@@ -343,6 +371,19 @@ fn django_parents(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bundled_tools_file_parses() {
+        let t = tools();
+        assert!(
+            t.internal_tables.iter().any(|x| x == "_cf_KV")
+                && t.env.contains_key("WRANGLER_LOG_PATH")
+        );
+        assert!(
+            t.test_marks.iter().any(|m| m == "\u{2193}")
+                && t.skip_dirs.iter().any(|d| d == "node_modules")
+        );
+    }
     use migate_core::order::check;
     use migate_core::{Finding, Severity};
 

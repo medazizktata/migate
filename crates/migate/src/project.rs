@@ -10,20 +10,15 @@ use migate_core::ledger::MigrationFile;
 use migate_core::order::Migration;
 use migate_migrators::Migrator;
 
-/// Directories that never hold the project's own migrations, even when git does not ignore them.
-const SKIP: &[&str] = &[
-    ".git",
-    "node_modules",
-    "target",
-    "vendor",
-    ".venv",
-    "venv",
-    "dist",
-    "build",
-    ".next",
-    ".wrangler",
-    "__pycache__",
-];
+/// Whether a path's folder never holds the project's own migrations, even when git does not ignore it: Git's own, or a
+/// tool's (dependencies, builds and state, listed in the bundled tools.toml).
+fn skipped(part: &str) -> bool {
+    part == ".git"
+        || migate_migrators::tools()
+            .skip_dirs
+            .iter()
+            .any(|d| d == part)
+}
 
 /// The project's migrations, and the files that hold them (a migration whose file is missing has no entry in `files`).
 #[derive(Debug)]
@@ -35,7 +30,7 @@ pub struct Project {
 pub fn read(root: &Path, migrator: &Migrator) -> Result<Project, String> {
     let mut matched: Vec<String> = git_files(root)?
         .into_iter()
-        .filter(|rel| !rel.split('/').any(|part| SKIP.contains(&part)))
+        .filter(|rel| !rel.split('/').any(skipped))
         .filter(|rel| migrator.matches(rel) && root.join(rel).is_file())
         .collect();
     matched.sort();
@@ -83,10 +78,7 @@ pub fn migrations_at(
     }
     let mut inputs = Vec::new();
     for rel in String::from_utf8_lossy(&listed.stdout).split('\0') {
-        if rel.is_empty()
-            || rel.split('/').any(|part| SKIP.contains(&part))
-            || !migrator.matches(rel)
-        {
+        if rel.is_empty() || rel.split('/').any(skipped) || !migrator.matches(rel) {
             continue;
         }
         let shown = crate::git::git(root, &["show", &format!("{rev}:./{rel}")])?;

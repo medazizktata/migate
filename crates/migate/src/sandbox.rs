@@ -19,46 +19,20 @@ use signal_hook::iterator::Signals;
 use migate_core::contract;
 use migate_core::diff::{Change, classify_with, diff};
 use migate_core::engine::{self, Database, TriggerProbe};
-use migate_core::schema::Kind;
+use migate_core::schema::{Kind, Snapshot};
 use migate_core::{Finding, Severity};
 use migate_migrators::Migrator;
 
 use crate::config::{Engine, Sandbox};
 use crate::project;
+use migate_migrators::tools;
 
-/// Variables passed from migate's own environment without being asked for: the toolchain's, never a connection or a
-/// credential (`BUNDLE_<host>` holds gem-server passwords, so Bundler's settings are named one by one).
-const PASSED: [&str; 18] = [
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "TERM",
-    "TMPDIR",
-    "TEMP",
-    "TMP",
-    "LANG",
-    "GEM_HOME",
-    "GEM_PATH",
-    "BUNDLE_PATH",
-    "BUNDLE_GEMFILE",
-    "BUNDLE_APP_CONFIG",
-    "BUNDLE_WITHOUT",
-    "BUNDLE_DEPLOYMENT",
-    "BUNDLE_FROZEN",
+/// Variables passed from migate's own environment without being asked for: the operating system's. A toolchain's
+/// own (language managers) are listed in the bundled tools.toml.
+const PASSED: [&str; 10] = [
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR", "TEMP", "TMP", "LANG",
 ];
-const PASSED_PREFIXES: [&str; 9] = [
-    "LC_",
-    "XDG_",
-    "RBENV_",
-    "PYENV_",
-    "VIRTUAL_ENV",
-    "CONDA_",
-    "NVM_",
-    "VOLTA_",
-    "COREPACK_",
-];
+const PASSED_PREFIXES: [&str; 2] = ["LC_", "XDG_"];
 
 /// The findings, and which engine and version the throwaway database ran (`postgres 18.6`).
 pub fn run(
@@ -128,6 +102,11 @@ pub fn run(
         .filter(|(k, _)| {
             PASSED.contains(&k.as_str())
                 || PASSED_PREFIXES.iter().any(|p| k.starts_with(p))
+                || tools().pass_env.contains(k)
+                || tools()
+                    .pass_env_prefixes
+                    .iter()
+                    .any(|p| k.starts_with(p.as_str()))
                 || cfg.pass_env.contains(k)
         })
         .collect();
@@ -146,18 +125,9 @@ pub fn run(
     for var in ["TMPDIR", "TEMP", "TMP"] {
         env.insert(var.into(), scratch.to_string_lossy().into_owned());
     }
-    // Tools that write under HOME but honour a variable write into the run instead (Wrangler's debug logs and dev
-    // registry), and a sandbox sends no telemetry. A value the configuration sets wins.
-    let run_dir = tmp.0.to_string_lossy().into_owned();
-    for (var, value) in [
-        ("WRANGLER_LOG_PATH", format!("{run_dir}/wrangler/logs")),
-        (
-            "WRANGLER_REGISTRY_PATH",
-            format!("{run_dir}/wrangler/registry"),
-        ),
-        ("WRANGLER_SEND_METRICS", "false".into()),
-    ] {
-        env.entry(var.into()).or_insert(value);
+    // Tools that would write under HOME are pointed into the run (tools.toml); a value the configuration sets wins.
+    for (var, value) in &tools().env {
+        env.entry(var.clone()).or_insert_with(|| vars(value));
     }
     let kept = Kept::new(cfg.keep_output.as_deref().map(|p| root.join(p)))?;
     let mut migrate_env = env.clone();
@@ -276,7 +246,7 @@ pub fn run(
             )));
         }
     }
-    let before = db.snapshot()?;
+    let before = without_host_tables(db.snapshot()?);
     let invalid =
         |why: String| format!("MG813 old-version-run-invalid: {why}. Nothing was checked");
 
@@ -306,13 +276,13 @@ pub fn run(
             )));
         }
     }
-    let rows_before = db.row_counts()?;
+    let rows_before = project_keys(db.row_counts()?);
     let unmodelled_before = db.unmodelled()?;
-    let values_before = db.value_counts()?;
+    let values_before = project_keys(db.value_counts()?);
 
     eprintln!("migate: migrating it to HEAD");
     let out = kept.save("head-migrate", sh(&migrate, &head_dir, &migrate_env)?)?;
-    let after = db.snapshot()?;
+    let after = without_host_tables(db.snapshot()?);
     // Read now: migate's own calibration writes to the file later, which would record migate's version instead.
     let newer_writer = db.newer_writer();
     let target_gap = match &cfg.target_version {
@@ -343,7 +313,7 @@ pub fn run(
             ),
         ));
     }
-    let values_after = db.value_counts()?;
+    let values_after = project_keys(db.value_counts()?);
     let filled = values_after
         .iter()
         .filter(|(_, n)| **n > 0)
@@ -372,7 +342,7 @@ pub fn run(
         ));
     }
     let mut lost_rows = BTreeSet::new();
-    for (table, now) in db.row_counts()? {
+    for (table, now) in project_keys(db.row_counts()?) {
         if let Some(&was) = rows_before.get(&table)
             && now < was
         {
@@ -693,6 +663,27 @@ fn project_markers(added: &[(String, String)], word: &str) -> Vec<(String, Strin
         .collect()
 }
 
+/// Whether `table` is one a host keeps in every database for itself (tools.toml), not the project's.
+fn host_table(table: &str) -> bool {
+    tools().internal_tables.iter().any(|t| t == table)
+}
+
+/// A snapshot without the host's own tables, and without their columns, indexes and triggers.
+fn without_host_tables(s: Snapshot) -> Snapshot {
+    s.retain(|o| {
+        !(o.kind() == Kind::Table && host_table(&o.name))
+            && !o.parent.as_deref().is_some_and(host_table)
+    })
+}
+
+/// Row or value counts (`namespace.table` or `namespace.table.column`) without the host's own tables.
+fn project_keys(counts: BTreeMap<String, u64>) -> BTreeMap<String, u64> {
+    counts
+        .into_iter()
+        .filter(|(k, _)| !k.split('.').nth(1).is_some_and(host_table))
+        .collect()
+}
+
 /// What a failed command said, for the report: exit status, then [`excerpt`] of its output.
 fn tail(out: &Output) -> String {
     let text = format!(
@@ -715,19 +706,14 @@ fn excerpt(text: &str) -> String {
     let lines: Vec<&str> = plain.lines().filter(|l| !l.trim().is_empty()).collect();
     let failing = |l: &&str| {
         // A passing test named after a failure case ("✓ a failure at item 9 ...") is not a failure.
-        // A passing or skipped test named after a failure case ("\u{2713} a failure at item 9", "\u{2193} rejects ... with
-        // an error") is not a failure, nor is a package manager's line saying the command it wrapped failed.
-        if l.trim_start()
-            .starts_with(['\u{2713}', '\u{2714}', '\u{2193}', '\u{25cb}'])
-            || [
-                "ELIFECYCLE",
-                "ERR_PNPM_",
-                "npm ERR!",
-                "Command failed with exit code",
-                "recursive run\" failed",
-            ]
+        // A passing or skipped test named after a failure case, or a package manager's line saying the command it
+        // wrapped failed, is not the failure (both listed in tools.toml).
+        let tools = tools();
+        if tools
+            .test_marks
             .iter()
-            .any(|w| l.contains(w))
+            .any(|m| l.trim_start().starts_with(m.as_str()))
+            || tools.wrapper_lines.iter().any(|w| l.contains(w.as_str()))
         {
             return false;
         }

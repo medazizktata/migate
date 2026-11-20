@@ -1,0 +1,33 @@
+# What migate knows about the tools a project's own commands run, kept as data like the migrators (ADR 0001): the
+# runner reads this file and names no tool itself. A new tool goes here, not into the code.
+
+# Variables passed from migate's environment to every sandbox command, besides the operating system's own: where
+# language managers keep their installs. Never a connection or a credential: BUNDLE_<host> holds gem-server
+# passwords, so Bundler's settings are named one by one.
+pass_env = [
+  "GEM_HOME", "GEM_PATH",                                                       # RubyGems
+  "BUNDLE_PATH", "BUNDLE_GEMFILE", "BUNDLE_APP_CONFIG", "BUNDLE_WITHOUT",       # Bundler
+  "BUNDLE_DEPLOYMENT", "BUNDLE_FROZEN",
+]
+pass_env_prefixes = ["RBENV_", "PYENV_", "VIRTUAL_ENV", "CONDA_", "NVM_"]
+
+# Folders never searched for migrations: dependencies, build output and tool state.
+skip_dirs = ["node_modules", "target", "vendor", ".venv", "venv", "dist", "build", ".next", ".wrangler", "__pycache__"]
+
+# Marks test runners print before a passing or a skipped test, whose name may still say "error" or "fail".
+test_marks = ["✓", "✔", "↓", "○"]
+
+# Lines a package manager prints when the command it wrapped failed: never the cause, so never in a failure excerpt.
+wrapper_lines = ["ELIFECYCLE", "ERR_PNPM_", "npm ERR!", "Command failed with exit code", "recursive run\" failed"]
+
+# Tables a host keeps in every database for its own use: not the project's schema, rows or values.
+internal_tables = [
+  "_cf_KV", # Cloudflare D1
+]
+
+# Variables set for every sandbox command, so that tools which would write under HOME write into the run instead,
+# which is removed with it ({dir} is inside the run's folder). A value the project's configuration sets wins.
+[env]
+WRANGLER_LOG_PATH = "{dir}/wrangler/logs"           # Wrangler: debug logs
+WRANGLER_REGISTRY_PATH = "{dir}/wrangler/registry"  # Wrangler: the dev registry
+WRANGLER_SEND_METRICS = "false"                     # Wrangler: no usage telemetry from a sandbox
