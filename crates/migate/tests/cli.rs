@@ -1843,10 +1843,24 @@ fn interrupt_as_initdb_finishes(attempt: u32) -> bool {
         .arg("check")
         .env("MIGATE_PG_BIN", &bin)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
+    // Bounded: if migate stops before initdb finishes, fail with its own words instead of waiting forever.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut child = child;
     while !done.exists() {
+        if child.try_wait().unwrap().is_some() {
+            let out = child.wait_with_output().unwrap();
+            panic!(
+                "migate stopped before initdb finished: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "initdb did not finish within 60 s"
+        );
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     Command::new("kill")
