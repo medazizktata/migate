@@ -1238,14 +1238,20 @@ fn pg_repo(second: &str) -> Repo {
 }
 
 fn postgres_servers_under(dir: &std::path::Path) -> usize {
+    postgres_server_lines(dir).len()
+}
+
+/// The `ps` lines of PostgreSQL servers whose data folder is under `dir`, with pid, parent and state.
+fn postgres_server_lines(dir: &std::path::Path) -> Vec<String> {
     let ps = Command::new("ps")
-        .args(["-Ao", "command"])
+        .args(["-Ao", "pid,ppid,stat,command"])
         .output()
         .unwrap();
     String::from_utf8_lossy(&ps.stdout)
         .lines()
         .filter(|l| l.contains("postgres -D") && l.contains(&*dir.to_string_lossy()))
-        .count()
+        .map(str::to_string)
+        .collect()
 }
 
 #[test]
@@ -1348,10 +1354,10 @@ fn an_interrupted_postgres_run_stops_its_server() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(
-        postgres_servers_under(&run),
-        0,
-        "the server outlived the interrupt"
+    let left = postgres_server_lines(&run);
+    assert!(
+        left.is_empty(),
+        "the server outlived the interrupt: {left:#?}"
     );
 }
 

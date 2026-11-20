@@ -100,7 +100,7 @@ pub fn run(
             &mut |command| {
                 let mut l = live();
                 let child = command.spawn()?;
-                l.groups.push(child.id());
+                l.servers.push(child.id());
                 Ok(child)
             },
         )?),
@@ -684,12 +684,15 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 #[derive(Debug)]
 struct Live {
     groups: Vec<u32>,
+    /// Database servers, stopped their own way ([`stop_server`]).
+    servers: Vec<u32>,
     worktrees: Vec<(PathBuf, PathBuf)>,
     dirs: Vec<PathBuf>,
 }
 
 static LIVE: Mutex<Live> = Mutex::new(Live {
     groups: Vec::new(),
+    servers: Vec::new(),
     worktrees: Vec::new(),
     dirs: Vec::new(),
 });
@@ -712,6 +715,9 @@ fn on_signals() {
                 for g in &l.groups {
                     stop_group(*g);
                 }
+                for s in &l.servers {
+                    stop_server(*s);
+                }
                 for (dir, root) in l.worktrees.drain(..) {
                     remove_worktree(&root, &dir);
                 }
@@ -723,6 +729,37 @@ fn on_signals() {
             }
         });
     });
+}
+
+/// SIGINT to a database server: PostgreSQL's fast shutdown, which ends the sessions and exits only once its children
+/// have. A process-group signal would reach the server alone, since each child runs in a session of its own
+/// (`setsid()` in PostgreSQL's miscinit.c). SIGKILL only if it is still running after 30 seconds.
+fn stop_server(pid: u32) {
+    let send = |sig: &str| {
+        let _ = Command::new("kill")
+            .args([sig, &pid.to_string()])
+            .stderr(Stdio::null())
+            .status();
+    };
+    // An exited child stays a zombie until reaped, and a zombie still answers `kill -0`: read its state instead.
+    let running = || {
+        Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .is_ok_and(|o| {
+                let state = String::from_utf8_lossy(&o.stdout);
+                let state = state.trim();
+                !state.is_empty() && !state.starts_with('Z')
+            })
+    };
+    send("-INT");
+    for _ in 0..300 {
+        if !running() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    send("-KILL");
 }
 
 /// SIGTERM to a process group, then SIGKILL if it is still there after two seconds.
