@@ -2404,3 +2404,38 @@ fn a_head_migrate_failure_is_never_retried() {
     assert_eq!(code, 2, "{out}{err}");
     assert!(out.contains("error   MG803"), "{out}");
 }
+
+#[test]
+fn setup_writes_the_gitignored_config_a_suite_needs() {
+    // The suite reads a gitignored .env; checkouts are fresh, so only setup can provide it, from the committed example.
+    let needs_env = "import os, sys\nif not os.path.exists('.env'):\n    sys.exit('missing .env')\nexec(open('old_app_real.py').read())\n";
+    let build = |config: &str| {
+        let r = Repo::new();
+        r.write("migate.toml", config);
+        r.write("apply.py", APPLY);
+        r.write("old_app_real.py", OLD_APP);
+        r.write("old_app.py", needs_env);
+        r.write(".gitignore", ".env\n");
+        r.write(".env.example", "SECRET=made-up\n");
+        r.write("migrations/0001_init.sql", INIT);
+        r.commit("init");
+        r.git(&["checkout", "-q", "-b", "pr"]);
+        r.write(
+            "migrations/0002_change.sql",
+            "ALTER TABLE users ADD COLUMN nickname TEXT;",
+        );
+        r.commit("change");
+        sandbox_check(&r, &[])
+    };
+    let (code, _, err) = build(SANDBOX_TOML);
+    assert_eq!(
+        code, 3,
+        "without setup the suite cannot even run at base: {err}"
+    );
+    let with_setup = SANDBOX_TOML.replace(
+        "[sandbox]\n",
+        "[sandbox]\nsetup = \"cp .env.example .env\"\n",
+    );
+    let (code, out, err) = build(&with_setup);
+    assert_eq!(code, 0, "{out}{err}");
+}

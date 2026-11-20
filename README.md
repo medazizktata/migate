@@ -124,6 +124,14 @@ allowlist. Probe a feature instead: `select 1_000` succeeds from SQLite 3.46.0 o
 allowlist (`json_pretty()`, `if()`) whatever its version; local Wrangler enforces the same list, so a sandbox that
 migrates through Wrangler fails on them (MG803) as production would.
 
+migate's checkouts are fresh, so the files your `.gitignore` keeps out (`.env`, `.dev.vars`) are not there, and a suite
+that needs them fails before checking anything. Write them in `setup`, which runs first in each checkout, from the
+project's committed example or the script your CI uses; never copy your own, which hold real secrets:
+
+```toml
+setup = "cp apps/web/.env.example apps/web/.env && pnpm install --frozen-lockfile"
+```
+
 Test frameworks that build their own test database must be told to use the migrated one, or migate cannot judge the
 run:
 
