@@ -844,6 +844,18 @@ mod tests {
     }
 
     #[test]
+    fn a_run_folder_already_there_is_never_reused() {
+        let parent = std::env::temp_dir().join(format!("migate-fresh-test-{}", std::process::id()));
+        std::fs::create_dir_all(parent.join("run-7-0")).unwrap();
+        std::fs::write(parent.join("run-7-0/planted"), "").unwrap();
+        let got = super::fresh_folder(&parent, 7, &std::sync::atomic::AtomicUsize::new(0)).unwrap();
+        let planted_kept = parent.join("run-7-0/planted").exists();
+        let _ = std::fs::remove_dir_all(&parent);
+        assert_eq!(got, parent.join("run-7-1"));
+        assert!(planted_kept);
+    }
+
+    #[test]
     fn output_with_no_failure_line_keeps_its_last_fifteen_lines() {
         let out: String = (0..30).map(|i| format!("line {i}\n")).collect();
         let got = excerpt(&out);
@@ -987,14 +999,13 @@ fn sweep(root: &Path, own: &Path) {
         return;
     };
     let me = std::process::id();
-    for entry in std::fs::read_dir(std::env::temp_dir())
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
+    let Some(runs) = own.parent() else {
+        return;
+    };
+    for entry in std::fs::read_dir(runs).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(pid) = name
-            .strip_prefix("migate-run-")
+            .strip_prefix("run-")
             .and_then(|rest| rest.split('-').next())
             .and_then(|p| p.parse::<u32>().ok())
         else {
@@ -1047,6 +1058,45 @@ impl Drop for Checkout {
     }
 }
 
+/// migate's own folder in the system temp folder, holding every run's folder (`run-<pid>-<n>`), so the sweep reads
+/// nothing else. Where the temp folder is shared between users, this one is shared the same way /tmp is: anyone may
+/// add a run, only its owner may remove it (mode 1777). A symbolic link in its place is refused, not followed.
+fn runs_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("migate");
+    match std::fs::symlink_metadata(&dir) {
+        Ok(m) if m.file_type().is_symlink() => {
+            return Err(format!(
+                "{} is a symbolic link; migate keeps its runs only in a real folder",
+                dir.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(_) => {
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            // Fails harmlessly when another user created it first.
+            let _ = std::fs::set_permissions(
+                &dir,
+                std::os::unix::fs::PermissionsExt::from_mode(0o1777),
+            );
+        }
+    }
+    Ok(dir)
+}
+
+/// A new folder `run-<pid>-<n>` in `parent`, created fresh, never reused: a folder already under a name (left, or
+/// planted) makes the run take the next number.
+fn fresh_folder(parent: &Path, pid: u32, next: &AtomicUsize) -> Result<PathBuf, String> {
+    for _ in 0..1000 {
+        let dir = parent.join(format!("run-{pid}-{}", next.fetch_add(1, Ordering::SeqCst)));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("{}: {e}", dir.display())),
+        }
+    }
+    Err(format!("{}: no free run folder name", parent.display()))
+}
+
 /// The run's folder, removed on drop (after the checkouts inside it, which are dropped first).
 #[derive(Debug)]
 struct TempDir(PathBuf);
@@ -1054,13 +1104,9 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn create() -> Result<TempDir, String> {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "migate-run-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::SeqCst)
-        ));
+        let parent = runs_dir()?;
         let mut l = live();
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let dir = fresh_folder(&parent, std::process::id(), &NEXT)?;
         l.dirs.push(dir.clone());
         // macOS Spotlight would index the checkouts' dependency folders it is about to remove.
         let _ = std::fs::write(dir.join(".metadata_never_index"), "");

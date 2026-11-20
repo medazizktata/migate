@@ -911,8 +911,8 @@ fn worktrees(r: &Repo) -> usize {
 }
 
 fn run_folders(pid: u32) -> usize {
-    let prefix = format!("migate-run-{pid}-");
-    fs::read_dir(std::env::temp_dir())
+    let prefix = format!("run-{pid}-");
+    fs::read_dir(std::env::temp_dir().join("migate"))
         .unwrap()
         .flatten()
         .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
@@ -992,7 +992,7 @@ fn a_run_cleans_up_what_a_killed_run_left_behind() {
         .as_nanos();
     let own_tmp = std::env::temp_dir().join(format!("migate-sweep-test-{unique}"));
     fs::create_dir_all(&own_tmp).unwrap();
-    let left = own_tmp.join(format!("migate-run-{dead}-1"));
+    let left = own_tmp.join("migate").join(format!("run-{dead}-1"));
     r.git(&[
         "worktree",
         "add",
@@ -1349,7 +1349,9 @@ fn an_interrupted_postgres_run_stops_its_server() {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     assert!(started.exists(), "the test command never started");
-    let run = std::env::temp_dir().join(format!("migate-run-{}-0", child.id()));
+    let run = std::env::temp_dir()
+        .join("migate")
+        .join(format!("run-{}-0", child.id()));
     assert_eq!(
         postgres_servers_under(&run),
         1,
@@ -2484,7 +2486,7 @@ fn project_tools_keep_their_logs_and_registry_inside_the_run() {
     let got = fs::read_to_string(&seen).unwrap();
     let parts: Vec<&str> = got.split('|').collect();
     assert!(
-        parts[0].contains("migate-run-") && parts[1].contains("migate-run-"),
+        parts[0].contains("/migate/run-") && parts[1].contains("/migate/run-"),
         "{got}"
     );
     assert_eq!((parts[2], parts[3]), ("false", "1"), "{got}");
@@ -2773,4 +2775,45 @@ fn a_language_managers_variables_reach_the_sandbox_and_others_do_not() {
     );
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(fs::read_to_string(&seen).unwrap(), "/gems/here|");
+}
+
+#[test]
+fn runs_live_in_one_shared_folder_the_way_tmp_is_shared() {
+    use std::os::unix::fs::PermissionsExt;
+    let own_tmp = std::env::temp_dir().join(format!("migate-layout-test-{}", std::process::id()));
+    fs::create_dir_all(&own_tmp).unwrap();
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[("TMPDIR", &*own_tmp.to_string_lossy())]);
+    assert_eq!(code, 0, "{out}{err}");
+    let mode = fs::metadata(own_tmp.join("migate"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o7777;
+    assert_eq!(
+        mode, 0o1777,
+        "anyone may add a run, only its owner may remove it"
+    );
+    assert_eq!(
+        fs::read_dir(&own_tmp).unwrap().count(),
+        1,
+        "one folder in the shared temp folder, nothing else"
+    );
+}
+
+#[test]
+fn a_symbolic_link_in_place_of_the_runs_folder_is_refused() {
+    let own_tmp = std::env::temp_dir().join(format!("migate-link-test-{}", std::process::id()));
+    let elsewhere = own_tmp.join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, own_tmp.join("migate")).unwrap();
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[("TMPDIR", &*own_tmp.to_string_lossy())]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(err.contains("is a symbolic link"), "{err}");
+    assert_eq!(
+        fs::read_dir(&elsewhere).unwrap().count(),
+        0,
+        "nothing was written through the link"
+    );
 }
