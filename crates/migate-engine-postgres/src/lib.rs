@@ -347,6 +347,12 @@ impl engine::Database for Db<'_> {
         None
     }
 
+    fn probe_trigger(&self, _table: &str, _trigger: &str) -> Result<engine::TriggerProbe, String> {
+        Ok(engine::TriggerProbe::Unknown(
+            "not built for PostgreSQL yet".into(),
+        ))
+    }
+
     fn target_gap(&self, target: &str) -> Result<Option<migate_core::Finding>, String> {
         let want = major(target)?;
         let running = self.0.version()?;

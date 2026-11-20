@@ -17,8 +17,9 @@ use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 
 use migate_core::contract;
-use migate_core::diff::{classify_with, diff};
-use migate_core::engine;
+use migate_core::diff::{Change, classify_with, diff};
+use migate_core::engine::{self, Database, TriggerProbe};
+use migate_core::schema::Kind;
 use migate_core::{Finding, Severity};
 use migate_migrators::Migrator;
 
@@ -318,7 +319,9 @@ pub fn run(
         .filter(|(_, n)| **n > 0)
         .map(|(k, _)| k.clone())
         .collect();
-    findings.extend(classify_with(&diff(&before, &after), &filled));
+    let changes = diff(&before, &after);
+    findings.extend(classify_with(&changes, &filled));
+    judge_triggers(&mut findings, &changes, db.as_ref())?;
     let unmodelled_after = db.unmodelled()?;
     for key in unmodelled_before
         .keys()
@@ -511,6 +514,60 @@ fn sh(command: &str, dir: &Path, env: &BTreeMap<String, String>) -> Result<Outpu
         .map_err(|e| format!("cannot run `{command}`: {e}"));
     live().groups.retain(|g| *g != id);
     out
+}
+
+/// A new or changed trigger's rule is judged by the rows its table holds: an error with the count if any would be
+/// refused if written again, a warning if rows exist and none would be, and an error still when there are no rows or
+/// the rows cannot judge it (the default is that the old app writes every table).
+fn judge_triggers(
+    findings: &mut [Finding],
+    changes: &[Change],
+    db: &dyn Database,
+) -> Result<(), String> {
+    for change in changes {
+        let o = match change {
+            Change::Added(o) | Change::Changed { head: o, .. } => o,
+            Change::Dropped(_) => continue,
+        };
+        let (Kind::Trigger, Some(table)) = (o.kind(), o.parent.as_deref()) else {
+            continue;
+        };
+        let label = format!("{}.{table}.{}", o.namespace, o.name);
+        let Some(f) = findings
+            .iter_mut()
+            .find(|f| matches!(f.rule, "MG503" | "MG504") && f.object == label)
+        else {
+            continue;
+        };
+        let of = |checked: u64, held: u64| {
+            if checked == held {
+                format!("the {held} rows")
+            } else {
+                format!("the first {checked} of the {held} rows")
+            }
+        };
+        match db.probe_trigger(table, &o.name)? {
+            TriggerProbe::Refused { refused, checked, held, message } => f.message.push_str(&format!(
+                "; {refused} of {} the database holds would be refused if written again: \"{message}\"",
+                of(checked, held)
+            )),
+            TriggerProbe::Accepted { checked, held } => {
+                f.severity = Severity::Warning;
+                f.message.push_str(&format!(
+                    "; none of {} the database holds would be refused if written again (they come from the \
+                     migrations, the seed and the base tests: production may hold others)",
+                    of(checked, held)
+                ));
+            }
+            TriggerProbe::NoRows => f
+                .message
+                .push_str("; the table holds no rows to judge it by (a seed adds some), so it stays an error"),
+            TriggerProbe::Unknown(why) => {
+                f.message.push_str(&format!("; it could not be judged by the rows ({why}), so it stays an error"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The rows the database held when the head migrations ran (the base migrations', the seed's and the base tests'):

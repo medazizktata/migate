@@ -24,6 +24,7 @@ use rusqlite::{Connection, OpenFlags, backup::Backup};
 use sha2::{Digest, Sha256};
 
 mod features;
+mod probe;
 mod sql;
 use sql::{Tok, first_group, split_top_level, squash, tokens};
 
@@ -849,6 +850,9 @@ impl engine::Database for File {
     }
     fn newer_writer(&self) -> Option<String> {
         newer_writer(&self.0)
+    }
+    fn probe_trigger(&self, table: &str, trigger: &str) -> Result<engine::TriggerProbe, String> {
+        probe::probe_trigger(&self.0, table, trigger).map_err(|e| e.0)
     }
     fn target_gap(&self, target: &str) -> Result<Option<migate_core::Finding>, String> {
         let target_n = target_number(target)?;

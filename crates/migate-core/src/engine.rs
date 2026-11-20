@@ -21,6 +21,24 @@ pub trait Sandbox {
     fn newer_syntax(&self, sql: &str, target: &str) -> Result<Vec<(u32, String, String)>, String>;
 }
 
+/// What re-writing the rows a table holds, each unchanged and under its own id, shows about one of its triggers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TriggerProbe {
+    /// `refused` of the `checked` rows (out of `held`) were refused; `message` is the first refusal.
+    Refused {
+        refused: u64,
+        checked: u64,
+        held: u64,
+        message: String,
+    },
+    /// None of the `checked` rows (out of `held`) was refused.
+    Accepted { checked: u64, held: u64 },
+    /// The table holds no row to judge it by.
+    NoRows,
+    /// The rows could not judge it, and why.
+    Unknown(String),
+}
+
 /// The migrated database, as the run reads and changes it.
 pub trait Database {
     fn snapshot(&self) -> Result<Snapshot, String>;
@@ -37,6 +55,9 @@ pub trait Database {
     /// When the migrations ran on a different engine version than production's (`target`), what that leaves
     /// unchecked. Read right after the migrations, as [`Database::newer_writer`] is.
     fn target_gap(&self, target: &str) -> Result<Option<Finding>, String>;
+    /// Whether `trigger` on `table` would refuse any row the table holds if it were written again. Never writes to the
+    /// database itself.
+    fn probe_trigger(&self, table: &str, trigger: &str) -> Result<TriggerProbe, String>;
     /// Every object the schema model does not cover, as `category name` -> its definition text, so a change to one is
     /// reported as not checked rather than passing in silence.
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String>;

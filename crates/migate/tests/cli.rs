@@ -2008,3 +2008,245 @@ fn postgres_runs_on_productions_major_when_it_is_installed() {
         "{out}"
     );
 }
+
+/// SANDBOX_TOML without the base tests: the rows a trigger is judged by come from the migrations alone.
+fn without_tests() -> String {
+    SANDBOX_TOML.replace("test = \"python3 old_app.py\"\n", "")
+}
+
+/// Two users from the base migration: one with a legacy value, one without.
+const TWO_USERS: &str =
+    "INSERT INTO users (id, email, legacy) VALUES (1, 'a@x', 'old'), (2, 'b@x', NULL);";
+
+fn trigger_run(first: &str, second: &str) -> (i32, String) {
+    let r = sandbox_repo_full(&without_tests(), OLD_APP, first, second);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    (code, format!("{out}{err}"))
+}
+
+#[test]
+fn a_trigger_that_refuses_a_row_the_database_holds_is_an_error_with_the_count() {
+    let (code, out) = trigger_run(
+        &format!("{INIT}\n{TWO_USERS}"),
+        "CREATE TRIGGER needs_legacy BEFORE INSERT ON users WHEN new.legacy IS NULL BEGIN SELECT RAISE(ABORT, 'legacy required'); END;",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(
+        out.contains("error   MG503  main.users.needs_legacy")
+            && out.contains("1 of the 2 rows")
+            && out.contains("legacy required"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_trigger_that_refuses_no_row_the_database_holds_is_a_warning() {
+    let (code, out) = trigger_run(
+        &format!("{INIT}\n{TWO_USERS}"),
+        "CREATE TRIGGER no_zzz BEFORE INSERT ON users WHEN new.legacy = 'zzz' BEGIN SELECT RAISE(ABORT, 'no zzz'); END;",
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("warning MG503  main.users.no_zzz") && out.contains("none of the 2 rows"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_trigger_on_an_empty_table_stays_an_error() {
+    let (code, out) = trigger_run(
+        INIT,
+        "CREATE TRIGGER no_zzz BEFORE INSERT ON users WHEN new.legacy = 'zzz' BEGIN SELECT RAISE(ABORT, 'no zzz'); END;",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(
+        out.contains("error   MG503  main.users.no_zzz") && out.contains("no rows to judge it by"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_row_written_back_is_not_refused_as_its_own_duplicate() {
+    // Uniqueness enforced by a trigger: a copy of the row would be refused; the row itself must not be.
+    let (code, out) = trigger_run(
+        &format!("{INIT}\n{TWO_USERS}"),
+        "CREATE TRIGGER one_email BEFORE INSERT ON users WHEN EXISTS (SELECT 1 FROM users u WHERE u.email = new.email)
+         BEGIN SELECT RAISE(ABORT, 'email taken'); END;",
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("warning MG503  main.users.one_email") && out.contains("none of the 2 rows"),
+        "{out}"
+    );
+}
+
+#[test]
+fn only_the_trigger_being_judged_can_refuse() {
+    // The base already has a trigger refusing every insert and one refusing every delete; neither is the new one's.
+    let first = format!(
+        "{INIT}\n{TWO_USERS}
+CREATE TRIGGER no_inserts BEFORE INSERT ON users BEGIN SELECT RAISE(ABORT, 'closed'); END;
+CREATE TRIGGER no_deletes BEFORE DELETE ON users BEGIN SELECT RAISE(ABORT, 'never delete'); END;"
+    );
+    let (code, out) = trigger_run(
+        &first,
+        "CREATE TRIGGER no_zzz BEFORE INSERT ON users WHEN new.legacy = 'zzz' BEGIN SELECT RAISE(ABORT, 'no zzz'); END;",
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("warning MG503  main.users.no_zzz") && out.contains("none of the 2 rows"),
+        "{out}"
+    );
+}
+
+#[test]
+fn each_kind_of_trigger_event_is_judged() {
+    let first = format!("{INIT}\n{TWO_USERS}");
+    for (name, body, refusal) in [
+        (
+            "on_update",
+            "BEFORE UPDATE OF legacy ON users WHEN new.legacy = 'old' BEGIN SELECT RAISE(ABORT, 'frozen'); END",
+            "frozen",
+        ),
+        (
+            "on_delete",
+            "BEFORE DELETE ON users WHEN old.id = 2 BEGIN SELECT RAISE(ABORT, 'keep two'); END",
+            "keep two",
+        ),
+        (
+            "after_insert",
+            "AFTER INSERT ON users WHEN new.legacy IS NULL BEGIN SELECT RAISE(ABORT, 'set legacy'); END",
+            "set legacy",
+        ),
+        (
+            "ignored",
+            "BEFORE INSERT ON users WHEN new.legacy IS NULL BEGIN SELECT RAISE(IGNORE); END",
+            "silently ignored",
+        ),
+        (
+            "rolled_back",
+            "BEFORE INSERT ON users WHEN new.legacy = 'old' BEGIN SELECT RAISE(ROLLBACK, 'undo'); END",
+            "undo",
+        ),
+    ] {
+        let (code, out) = trigger_run(&first, &format!("CREATE TRIGGER {name} {body};"));
+        assert_eq!(code, 2, "{name}: {out}");
+        assert!(
+            out.contains(&format!("error   MG503  main.users.{name}"))
+                && out.contains("1 of the 2 rows")
+                && out.contains(refusal),
+            "{name}: {out}"
+        );
+    }
+}
+
+#[test]
+fn each_kind_of_table_keeps_its_rows_and_ids() {
+    // A hidden rowid, AUTOINCREMENT (with a UNIQUE column), WITHOUT ROWID and a generated column: one row of two is refused
+    // in each, so a row written back under a new id, or a generated value not recomputed, would show in the count.
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('keep'), ('bad');
+CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE); INSERT INTO tags (name) VALUES ('ok'), ('bad');
+CREATE TABLE codes (code TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID; INSERT INTO codes VALUES ('k1', 'ok'), ('k2', 'bad');
+CREATE TABLE prices (id INTEGER PRIMARY KEY, net INTEGER, gross INTEGER GENERATED ALWAYS AS (net * 2) STORED);
+INSERT INTO prices (id, net) VALUES (1, 10), (2, 600);";
+    let second = "CREATE TRIGGER notes_ok BEFORE INSERT ON notes WHEN new.body = 'bad' BEGIN SELECT RAISE(ABORT, 'bad note'); END;
+CREATE TRIGGER tags_ok BEFORE INSERT ON tags WHEN new.name = 'bad' BEGIN SELECT RAISE(ABORT, 'bad tag'); END;
+CREATE TRIGGER codes_ok BEFORE INSERT ON codes WHEN new.v = 'bad' BEGIN SELECT RAISE(ABORT, 'bad code'); END;
+CREATE TRIGGER prices_ok BEFORE INSERT ON prices WHEN new.gross > 1000 BEGIN SELECT RAISE(ABORT, 'too dear'); END;";
+    let (code, out) = trigger_run(first, second);
+    assert_eq!(code, 2, "{out}");
+    for (table, refusal) in [
+        ("notes", "bad note"),
+        ("tags", "bad tag"),
+        ("codes", "bad code"),
+        ("prices", "too dear"),
+    ] {
+        let line = out
+            .lines()
+            .find(|l| l.contains(&format!("main.{table}.{table}_ok")))
+            .unwrap_or_else(|| panic!("{table}: {out}"));
+        assert!(
+            line.starts_with("error   MG503")
+                && line.contains("1 of the 2 rows")
+                && line.contains(refusal),
+            "{line}"
+        );
+    }
+}
+
+#[test]
+fn a_changed_trigger_is_judged_and_a_dropped_one_is_not() {
+    let first = format!(
+        "{INIT}\n{TWO_USERS}
+CREATE TRIGGER guard BEFORE INSERT ON users WHEN new.legacy = 'zzz' BEGIN SELECT RAISE(ABORT, 'no zzz'); END;
+CREATE TRIGGER gone BEFORE INSERT ON users WHEN new.legacy = 'zzz' BEGIN SELECT RAISE(ABORT, 'no zzz'); END;"
+    );
+    let (code, out) = trigger_run(
+        &first,
+        "DROP TRIGGER guard;
+CREATE TRIGGER guard BEFORE INSERT ON users WHEN new.legacy = 'old' BEGIN SELECT RAISE(ABORT, 'no old'); END;
+DROP TRIGGER gone;",
+    );
+    assert_eq!(code, 2, "{out}");
+    let line = |name: &str| {
+        out.lines()
+            .find(|l| l.contains(&format!("main.users.{name}")))
+            .unwrap_or_else(|| panic!("{name}: {out}"))
+            .to_string()
+    };
+    assert!(
+        line("guard").starts_with("error   MG504") && line("guard").contains("1 of the 2 rows"),
+        "{out}"
+    );
+    assert!(
+        !line("gone").contains("rows"),
+        "a dropped trigger refuses nothing new: {out}"
+    );
+}
+
+#[test]
+fn postgres_says_it_cannot_judge_a_trigger_by_its_rows_yet() {
+    let r = pg_repo(
+        "create function no_zzz() returns trigger language plpgsql as $$ begin raise exception 'no zzz'; end $$;
+create trigger no_zzz before insert on users for each row when (new.email = 'zzz') execute function no_zzz();",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("error   MG503") && out.contains("not built for PostgreSQL yet"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_row_that_fails_for_another_reason_cannot_judge_the_trigger() {
+    // A row stored while CHECK constraints were ignored: writing it again fails on the CHECK, not on the trigger.
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE stock (id INTEGER PRIMARY KEY, n INTEGER CHECK (n >= 0));
+PRAGMA ignore_check_constraints = ON; INSERT INTO stock VALUES (1, -5); PRAGMA ignore_check_constraints = OFF;";
+    let (code, out) = trigger_run(
+        first,
+        "CREATE TRIGGER cap BEFORE INSERT ON stock WHEN new.n > 100 BEGIN SELECT RAISE(ABORT, 'too many'); END;",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(
+        out.contains("error   MG503  main.stock.cap")
+            && out.contains("failed outside the trigger")
+            && out.contains("CHECK"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_trigger_on_a_view_stays_an_error() {
+    let (code, out) = trigger_run(
+        &format!("{INIT}\n{TWO_USERS}\nCREATE VIEW people AS SELECT id, email FROM users;"),
+        "CREATE TRIGGER people_in INSTEAD OF INSERT ON people BEGIN INSERT INTO users (email) VALUES (new.email); END;",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(
+        out.contains("error   MG503  main.people.people_in") && out.contains("a trigger on a view"),
+        "{out}"
+    );
+}
