@@ -50,11 +50,13 @@ pub struct Server {
 impl Server {
     /// `initdb` a cluster under `dir`, start it, create the `migate` database. The server process is started by
     /// `spawn`, so the caller can start and record it in one step that an interrupt's clean-up cannot fall between.
+    /// `target` is production's version (`target_version`): its major's installed server is used when there is one.
     pub fn start(
         dir: &Path,
+        target: Option<&str>,
         spawn: &mut dyn FnMut(&mut Command) -> std::io::Result<Child>,
     ) -> Result<Server, String> {
-        let bin = bindir()?;
+        let bin = bindir(target.map(major).transpose()?)?;
         let data = dir.join("pgdata");
         let out = Command::new(bin.join("initdb"))
             .env_clear()
@@ -229,6 +231,23 @@ impl engine::Sandbox for Server {
     fn open(&self, _history: &str) -> Result<Box<dyn engine::Database + '_>, String> {
         Ok(Box::new(Db(self)))
     }
+
+    /// None to find by reading: the migrations run on production's major when it is installed, and when it is not,
+    /// [`engine::Database::target_gap`] says so.
+    fn newer_syntax(&self, _sql: &str, target: &str) -> Result<Vec<(u32, String, String)>, String> {
+        major(target).map(|_| Vec::new())
+    }
+}
+
+/// The major version in `target` (`15`, `15.4`).
+fn major(target: &str) -> Result<u32, String> {
+    target
+        .split('.')
+        .next()
+        .and_then(|m| m.trim().parse().ok())
+        .ok_or_else(|| {
+            format!("target_version `{target}` is not a PostgreSQL version such as 15 or 15.4")
+        })
 }
 
 struct Db<'a>(&'a Server);
@@ -328,6 +347,23 @@ impl engine::Database for Db<'_> {
         None
     }
 
+    fn target_gap(&self, target: &str) -> Result<Option<migate_core::Finding>, String> {
+        let want = major(target)?;
+        let running = self.0.version()?;
+        if major(&running)? == want {
+            return Ok(None);
+        }
+        Ok(Some(migate_core::Finding::new(
+            "MG806",
+            migate_core::Severity::Warning,
+            "sandbox",
+            format!(
+                "the migrations ran on PostgreSQL {running}, production runs PostgreSQL {target}: install PostgreSQL \
+                 {want} (or point MIGATE_PG_BIN at it) so they run on production's version"
+            ),
+        )))
+    }
+
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
         let mut out = BTreeMap::new();
         for r in rows(&self.0.bin, &self.0.url, &unmodelled_query())? {
@@ -371,18 +407,8 @@ impl engine::Database for Db<'_> {
     }
 }
 
-/// Where the Postgres programs are: `MIGATE_PG_BIN`, then `postgres` on PATH, then the usual install folders.
-fn bindir() -> Result<PathBuf, String> {
-    if let Some(dir) = std::env::var_os("MIGATE_PG_BIN") {
-        return Ok(PathBuf::from(dir));
-    }
-    let on_path = std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
-        .find(|d| d.join("postgres").is_file() && d.join("initdb").is_file());
-    if let Some(dir) = on_path {
-        return Ok(dir);
-    }
+/// Installed servers by major version, in the folders that keep one per version.
+fn installed() -> Vec<(u32, PathBuf)> {
     // Homebrew keeps the server out of PATH (`pg_config` there is often libpq's); Debian and Ubuntu keep it per version.
     let mut found: Vec<(u32, PathBuf)> = Vec::new();
     for (root, prefix) in [
@@ -404,6 +430,26 @@ fn bindir() -> Result<PathBuf, String> {
             }
         }
     }
+    found
+}
+
+/// Where the Postgres programs are: `MIGATE_PG_BIN`, then the installed server of major `want` (production's), then
+/// `postgres` on PATH, then the newest in the usual install folders.
+fn bindir(want: Option<u32>) -> Result<PathBuf, String> {
+    if let Some(dir) = std::env::var_os("MIGATE_PG_BIN") {
+        return Ok(PathBuf::from(dir));
+    }
+    if let Some(bin) = want.and_then(|w| installed().into_iter().find(|(v, _)| *v == w)) {
+        return Ok(bin.1);
+    }
+    let on_path = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+        .find(|d| d.join("postgres").is_file() && d.join("initdb").is_file());
+    if let Some(dir) = on_path {
+        return Ok(dir);
+    }
+    let mut found = installed();
     found.sort();
     found.pop().map(|(_, bin)| bin).ok_or_else(|| {
         "no PostgreSQL server programs found (postgres, initdb): install PostgreSQL, put its bin folder on PATH, or set \

@@ -15,6 +15,7 @@
 //! setup = "pnpm install --frozen-lockfile"     # run in each checkout first (a fresh checkout has no dependencies)
 //! seed = "pnpm run seed"                       # optional: rows for the data-loss check
 //! test = "pnpm test"                           # the base version's tests, run against the migrated database
+//! target_version = "3.37.2"                     # optional: production's engine version (SQLite 3.37.2, PostgreSQL 15)
 //! ```
 
 use std::collections::BTreeMap;
@@ -79,6 +80,9 @@ pub struct Sandbox {
     /// nothing), at head (the check), and after a pass, on the same throwaway database with every table but the migration
     /// history dropped (they must fail, or they never used the database).
     pub test: Option<String>,
+    /// The engine version production runs (`3.37.2` for SQLite, `15` for PostgreSQL), when it differs from the
+    /// sandbox's: syntax production lacks is an error (MG701), and PostgreSQL runs on that major when installed.
+    pub target_version: Option<String>,
 }
 
 /// `explicit` is `--config`; without it, `<root>/migate.toml` is read if present.

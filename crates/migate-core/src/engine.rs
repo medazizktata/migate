@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::Finding;
 use crate::schema::Snapshot;
 
 /// One throwaway database for one run. Dropping it removes the database (and stops its server, if it has one).
@@ -13,6 +14,11 @@ pub trait Sandbox {
     /// The database the migrate command wrote, or why there is none (it most likely wrote somewhere else). `history`
     /// is the migrator's history query, for engines that must pick the database among several candidates.
     fn open(&self, history: &str) -> Result<Box<dyn Database + '_>, String>;
+
+    /// Syntax in a migration's `sql` that the engine version production runs (`target`, from `target_version`)
+    /// rejects: (line, feature, the first version that runs it). An engine that runs the migrations on that very
+    /// version finds none. An error when `target` names no version of this engine.
+    fn newer_syntax(&self, sql: &str, target: &str) -> Result<Vec<(u32, String, String)>, String>;
 }
 
 /// The migrated database, as the run reads and changes it.
@@ -28,6 +34,9 @@ pub trait Database {
     /// Why this reader may misread the database, if it might: the database was last written by a newer engine
     /// version than the one reading it.
     fn newer_writer(&self) -> Option<String>;
+    /// When the migrations ran on a different engine version than production's (`target`), what that leaves
+    /// unchecked. Read right after the migrations, as [`Database::newer_writer`] is.
+    fn target_gap(&self, target: &str) -> Result<Option<Finding>, String>;
     /// Every object the schema model does not cover, as `category name` -> its definition text, so a change to one is
     /// reported as not checked rather than passing in silence.
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String>;

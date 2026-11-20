@@ -86,6 +86,15 @@ The schema diff covers tables, columns, keys, constraints, indexes, views, trigg
 A change to anything else (a policy, a grant, a domain, an exclusion constraint, a partition and the like) is named
 as not checked (MG801): only the base version's tests judged it.
 
+Production may run an older engine than the sandbox. Set `target_version` under `[sandbox]` (`"3.37.2"` for SQLite,
+`"15"` for PostgreSQL): a SQL migration using syntax that version lacks is an error (MG701), PostgreSQL runs on that
+major when it is installed, and the run says what it could not check on production's version (MG806).
+
+Cloudflare D1 neither publishes its SQLite version nor lets a query read it: `sqlite_version()` is outside its function
+allowlist. Probe a feature instead: `select 1_000` succeeds from SQLite 3.46.0 on. D1 refuses functions outside that
+allowlist (`json_pretty()`, `if()`) whatever its version; local Wrangler enforces the same list, so a sandbox that
+migrates through Wrangler fails on them (MG803) as production would.
+
 Test frameworks that build their own test database must be told to use the migrated one, or migate cannot judge the
 run:
 

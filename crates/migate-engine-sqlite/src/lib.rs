@@ -23,6 +23,7 @@ use migate_core::schema::{
 use rusqlite::{Connection, OpenFlags, backup::Backup};
 use sha2::{Digest, Sha256};
 
+mod features;
 mod sql;
 use sql::{Tok, first_group, split_top_level, squash, tokens};
 
@@ -120,22 +121,28 @@ pub fn row_counts(path: &Path) -> Result<BTreeMap<String, u64>, Error> {
 /// Whether the database at `path` was last written by a newer SQLite than the one compiled into migate, and which.
 /// Bytes 96-99 of the file header hold the last writer's version number; SQLite writes them and never checks them.
 pub fn newer_writer(path: &Path) -> Option<String> {
+    let writer = writer_version(path)?;
+    let reader = u32::try_from(rusqlite::version_number()).unwrap_or(u32::MAX);
+    (writer > reader).then(|| {
+        format!(
+            "the migrations ran with SQLite {}, newer than the {} migate reads the database with",
+            features::dotted(writer),
+            features::dotted(reader)
+        )
+    })
+}
+
+/// The version of the SQLite that last wrote the database at `path`: bytes 96-99 of the file header.
+fn writer_version(path: &Path) -> Option<u32> {
     use std::io::Read;
     let mut header = [0u8; 100];
     std::fs::File::open(path)
         .ok()?
         .read_exact(&mut header)
         .ok()?;
-    let writer = u32::from_be_bytes([header[96], header[97], header[98], header[99]]);
-    let reader = u32::try_from(rusqlite::version_number()).unwrap_or(u32::MAX);
-    let dotted = |n: u32| format!("{}.{}.{}", n / 1_000_000, n / 1000 % 1000, n % 1000);
-    (writer > reader).then(|| {
-        format!(
-            "the migrations ran with SQLite {}, newer than the {} migate reads the database with",
-            dotted(writer),
-            dotted(reader)
-        )
-    })
+    Some(u32::from_be_bytes([
+        header[96], header[97], header[98], header[99],
+    ]))
 }
 
 /// What the model does not cover in the database at `path`, as `category name` -> definition: a virtual table's module
@@ -816,6 +823,20 @@ impl engine::Sandbox for Throwaway {
             .ok_or_else(|| format!("no database at {}", self.db.display()))?;
         Ok(Box::new(File(path)))
     }
+
+    fn newer_syntax(&self, sql: &str, target: &str) -> Result<Vec<(u32, String, String)>, String> {
+        let target = target_number(target)?;
+        Ok(features::newer_than(sql, target)
+            .into_iter()
+            .map(|(line, feature, since)| (line, feature.to_string(), features::dotted(since)))
+            .collect())
+    }
+}
+
+fn target_number(target: &str) -> Result<u32, String> {
+    features::version_number(target).ok_or_else(|| {
+        format!("target_version `{target}` is not a SQLite version such as 3.37 or 3.37.2")
+    })
 }
 
 /// The database file the migrate command wrote.
@@ -828,6 +849,21 @@ impl engine::Database for File {
     }
     fn newer_writer(&self) -> Option<String> {
         newer_writer(&self.0)
+    }
+    fn target_gap(&self, target: &str) -> Result<Option<migate_core::Finding>, String> {
+        let target_n = target_number(target)?;
+        Ok(writer_version(&self.0).filter(|&w| w > target_n).map(|w| {
+            migate_core::Finding::new(
+                "MG806",
+                migate_core::Severity::Note,
+                "sandbox",
+                format!(
+                    "the migrations ran on SQLite {}, production runs {target}: syntax newer than production's is \
+                     checked (MG701), but behaviour that differs between the two versions was not run",
+                    features::dotted(w)
+                ),
+            )
+        }))
     }
     fn snapshot(&self) -> Result<Snapshot, String> {
         snapshot(&self.0).map_err(|e| e.0)

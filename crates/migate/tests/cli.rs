@@ -1901,3 +1901,104 @@ fn a_database_written_by_an_older_or_the_same_sqlite_is_not_flagged() {
     assert_eq!(code, 0, "{out}{err}");
     assert!(!out.contains("MG805"), "{out}");
 }
+
+fn with_target(config: &str, target: &str) -> String {
+    config.replacen(
+        "[sandbox]\n",
+        &format!("[sandbox]\ntarget_version = \"{target}\"\n"),
+        1,
+    )
+}
+
+#[test]
+fn sqlite_syntax_newer_than_production_is_an_error() {
+    let r = sandbox_repo(
+        &with_target(SANDBOX_TOML, "3.31"),
+        "CREATE TABLE plain (id INTEGER);\nCREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT) STRICT;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("error   MG701  STRICT table (migrations/0002_change.sql:2)")
+            && out.contains("3.37.0"),
+        "{out}"
+    );
+    assert!(
+        out.contains("note    MG806"),
+        "the sandbox's SQLite is newer than 3.31: {out}"
+    );
+}
+
+#[test]
+fn sqlite_syntax_production_can_run_passes() {
+    let r = sandbox_repo(
+        &with_target(SANDBOX_TOML, "3.99"),
+        "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT) STRICT;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!out.contains("MG701") && !out.contains("MG806"), "{out}");
+}
+
+#[test]
+fn a_target_version_that_names_no_release_cannot_check() {
+    let r = sandbox_repo(&with_target(SANDBOX_TOML, "latest"), "SELECT 1;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("target_version") && err.contains("latest"),
+        "{err}"
+    );
+}
+
+#[test]
+fn postgres_without_productions_version_installed_says_so() {
+    let r = pg_repo("alter table users add column nickname text;");
+    std::fs::write(r.dir.join("migate.toml"), with_target(PG_TOML, "9")).unwrap();
+    r.commit("target 9");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "a warning, not an error: {out}{err}");
+    assert!(
+        out.contains("warning MG806") && out.contains("PostgreSQL 9"),
+        "{out}"
+    );
+}
+
+#[test]
+fn postgres_runs_on_productions_major_when_it_is_installed() {
+    if std::env::var_os("MIGATE_PG_BIN").is_some() {
+        eprintln!("skipped: MIGATE_PG_BIN chooses the server explicitly");
+        return;
+    }
+    let mut majors: Vec<u32> = ["/opt/homebrew/opt", "/usr/local/opt", "/usr/lib/postgresql"]
+        .iter()
+        .flat_map(|root| fs::read_dir(root).into_iter().flatten().flatten())
+        .filter(|e| e.path().join("bin/postgres").is_file())
+        .filter_map(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .trim_start_matches("postgresql@")
+                .parse()
+                .ok()
+        })
+        .collect();
+    majors.sort_unstable();
+    majors.dedup();
+    let [oldest, .., _] = majors[..] else {
+        eprintln!("skipped: needs two PostgreSQL majors installed, found {majors:?}");
+        return;
+    };
+    let r = pg_repo("alter table users add column nickname text;");
+    std::fs::write(
+        r.dir.join("migate.toml"),
+        with_target(PG_TOML, &oldest.to_string()),
+    )
+    .unwrap();
+    r.commit("target oldest");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains(&format!("sandbox: postgres {oldest}.")) && !out.contains("MG806"),
+        "{out}"
+    );
+}

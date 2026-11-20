@@ -222,6 +222,12 @@ pub const RULES: &[Rule] = &[
         axes: "B",
     },
     Rule {
+        id: "MG701",
+        name: "newer-than-production",
+        description: "A migration uses syntax the engine version production runs (target_version) does not have. It runs in the sandbox and fails at deploy.",
+        axes: "F",
+    },
+    Rule {
         id: "MG801",
         name: "not-checked",
         description: "The migration changed an object the schema model does not cover (a policy, a domain, a grant, an exclusion constraint and the like), so the schema diff could not judge it. Only the base version's tests did.",
@@ -231,6 +237,12 @@ pub const RULES: &[Rule] = &[
         id: "MG805",
         name: "newer-writer",
         description: "The migrations ran with a newer SQLite than the one migate reads the database with. A feature newer than migate's SQLite may be misread or unreadable; update migate.",
+        axes: "",
+    },
+    Rule {
+        id: "MG806",
+        name: "sandbox-version-differs",
+        description: "The migrations ran on a different engine version than production's (target_version): what differs between the two versions was not checked by running it.",
         axes: "",
     },
     Rule {

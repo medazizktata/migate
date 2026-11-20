@@ -96,6 +96,7 @@ pub fn run(
         // Started and recorded under the lock, as `sh` does: an interrupt either stops it or comes before it starts.
         Engine::Postgres => Box::new(migate_engine_postgres::Server::start(
             &dir,
+            cfg.target_version.as_deref(),
             &mut |command| {
                 let mut l = live();
                 let child = command.spawn()?;
@@ -177,6 +178,23 @@ pub fn run(
         .filter(|f| !at_base.contains(&f.path))
         .map(|f| (f.path, String::from_utf8_lossy(&f.bytes).into_owned()))
         .collect();
+    // Syntax production's engine version lacks, in the SQL migrations this change adds.
+    let mut too_new = Vec::new();
+    if let Some(target) = &cfg.target_version {
+        for (path, text) in added.iter().filter(|(p, _)| p.ends_with(".sql")) {
+            for (line, feature, since) in sandbox.newer_syntax(text, target)? {
+                too_new.push(
+                    Finding::new(
+                        "MG701",
+                        Severity::Error,
+                        feature,
+                        format!("needs version {since}; production runs {target} (target_version), so it fails at deploy"),
+                    )
+                    .at(path.clone(), line),
+                );
+            }
+        }
+    }
     let (mut markers, mut bad_markers) = (Vec::new(), Vec::new());
     for (path, text) in &added {
         let (m, bad) = contract::parse(path, text);
@@ -266,7 +284,12 @@ pub fn run(
     let after = db.snapshot()?;
     // Read now: migate's own calibration writes to the file later, which would record migate's version instead.
     let newer_writer = db.newer_writer();
-    let mut findings = Vec::new();
+    let target_gap = match &cfg.target_version {
+        Some(target) => db.target_gap(target)?,
+        None => None,
+    };
+    let mut findings = too_new;
+    findings.extend(target_gap);
     if let Some(why) = newer_writer {
         findings.push(Finding::new(
             "MG805",
@@ -435,6 +458,9 @@ fn share(rel: &str, target: &Path, checkouts: &[&PathBuf]) -> Result<(), String>
 /// Point a finding at the added migration that names its object (the latest one, at the first line naming it), else at
 /// the latest added migration. Findings stay unplaced when the change adds no migration.
 fn place(f: Finding, added: &[(String, String)]) -> Finding {
+    if f.at.is_some() {
+        return f;
+    }
     let Some((last, _)) = added.last() else {
         return f;
     };
