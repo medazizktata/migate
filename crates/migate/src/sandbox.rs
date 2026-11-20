@@ -93,10 +93,16 @@ pub fn run(
             dir.join("sandbox.db"),
             cfg.database.as_deref().or(tool_location).map(in_dir),
         )),
-        // The server is stopped with the run's commands if the run is interrupted, even while it starts.
-        Engine::Postgres => Box::new(migate_engine_postgres::Server::start(&dir, &mut |group| {
-            live().groups.push(group);
-        })?),
+        // Started and recorded under the lock, as `sh` does: an interrupt either stops it or comes before it starts.
+        Engine::Postgres => Box::new(migate_engine_postgres::Server::start(
+            &dir,
+            &mut |command| {
+                let mut l = live();
+                let child = command.spawn()?;
+                l.groups.push(child.id());
+                Ok(child)
+            },
+        )?),
     };
     let placeholders = sandbox.placeholders();
     let vars = |s: &str| {

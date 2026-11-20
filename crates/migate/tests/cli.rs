@@ -1792,3 +1792,70 @@ fn a_migration_that_fails_on_the_rows_present_says_which_rows() {
         "{out}"
     );
 }
+
+#[test]
+fn an_interrupt_as_initdb_finishes_leaves_no_server() {
+    // The handler's clean-up takes a while (the new cluster's files); a server must not start meanwhile and then
+    // outlive the run. The window is narrow, so three attempts: the old code left a server in 5 of 6 single attempts.
+    for attempt in 0..3 {
+        assert!(
+            !interrupt_as_initdb_finishes(attempt),
+            "attempt {attempt}: a server outlived the run"
+        );
+    }
+}
+
+/// Interrupt a run the moment initdb finishes; whether a server it started is still running afterwards.
+fn interrupt_as_initdb_finishes(attempt: u32) -> bool {
+    let r = pg_repo("select 1;");
+    let done = r.dir.join(format!("initdb.done.{attempt}"));
+    let pid_file = r.dir.join(format!("server.pid.{attempt}"));
+    let bin = fake_pg_bin(
+        &r.dir,
+        &format!("echo $$ > {}\nexec sleep 60", pid_file.display()),
+    );
+    let real_initdb = fs::read_link(bin.join("initdb")).unwrap();
+    fs::remove_file(bin.join("initdb")).unwrap();
+    fs::write(
+        bin.join("initdb"),
+        format!(
+            "#!/bin/sh\n{} \"$@\"; s=$?; touch {}; sleep 0.02; exit $s\n",
+            real_initdb.display(),
+            done.display()
+        ),
+    )
+    .unwrap();
+    Command::new("chmod")
+        .args(["+x", &bin.join("initdb").to_string_lossy()])
+        .status()
+        .unwrap();
+    let child = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .arg("check")
+        .env("MIGATE_PG_BIN", &bin)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    while !done.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert_eq!(child.wait_with_output().unwrap().status.code(), Some(3));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let Ok(server) = fs::read_to_string(&pid_file) else {
+        return false; // never started
+    };
+    let alive = Command::new("kill")
+        .args(["-0", server.trim()])
+        .status()
+        .unwrap()
+        .success();
+    if alive {
+        let _ = Command::new("kill").args(["-KILL", server.trim()]).status();
+    }
+    alive
+}

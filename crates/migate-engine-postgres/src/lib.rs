@@ -48,9 +48,12 @@ pub struct Server {
 }
 
 impl Server {
-    /// `initdb` a cluster under `dir`, start it, create the `migate` database. `spawned` gets the server's process
-    /// group as soon as it exists, before the wait for connections, so an interrupt during start-up can stop it.
-    pub fn start(dir: &Path, spawned: &mut dyn FnMut(u32)) -> Result<Server, String> {
+    /// `initdb` a cluster under `dir`, start it, create the `migate` database. The server process is started by
+    /// `spawn`, so the caller can start and record it in one step that an interrupt's clean-up cannot fall between.
+    pub fn start(
+        dir: &Path,
+        spawn: &mut dyn FnMut(&mut Command) -> std::io::Result<Child>,
+    ) -> Result<Server, String> {
         let bin = bindir()?;
         let data = dir.join("pgdata");
         let out = Command::new(bin.join("initdb"))
@@ -79,7 +82,8 @@ impl Server {
         let log_path = dir.join("postgres.log");
         let log =
             std::fs::File::create(&log_path).map_err(|e| format!("{}: {e}", log_path.display()))?;
-        let child = Command::new(bin.join("postgres"))
+        let mut command = Command::new(bin.join("postgres"));
+        command
             .env_clear()
             // macOS refuses to start a postmaster with no locale set ("became multithreaded during startup").
             .env("LC_ALL", "C")
@@ -100,10 +104,8 @@ impl Server {
             .process_group(0)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(log)
-            .spawn()
-            .map_err(|e| format!("cannot start postgres: {e}"))?;
-        spawned(child.id());
+            .stderr(log);
+        let child = spawn(&mut command).map_err(|e| format!("cannot start postgres: {e}"))?;
         let admin = format!("postgresql://{USER}@127.0.0.1:{port}/postgres");
         let mut server = Server {
             url: format!("postgresql://{USER}@127.0.0.1:{port}/{DATABASE}"),
