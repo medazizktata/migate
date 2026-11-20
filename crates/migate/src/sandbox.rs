@@ -220,7 +220,16 @@ pub fn run(
     }
 
     eprintln!("migate: migrating a throwaway database to {base}");
-    let out = sh(&migrate, &base_dir, &migrate_env)?;
+    let mut out = sh(&migrate, &base_dir, &migrate_env)?;
+    if !out.status.success() {
+        // One retry, for set-up only: a dropped connection should not cost the verdict. The head migrations get none,
+        // since their failure is a finding (MG803).
+        eprintln!(
+            "migate: the migrate command failed at {base}; running it once again:\n{}",
+            tail(&out)
+        );
+        out = sh(&migrate, &base_dir, &migrate_env)?;
+    }
     if !out.status.success() {
         // Its own output says why: a migration failing on an empty database, or a command that cannot run here (a tool
         // not installed where it runs, the wrong folder). Naming one cause would mislead on the other.

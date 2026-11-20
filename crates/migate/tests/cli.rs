@@ -2375,3 +2375,32 @@ fn a_migrate_command_that_cannot_run_is_reported_as_itself() {
         "{err}"
     );
 }
+
+#[test]
+fn a_base_migrate_that_fails_once_is_retried() {
+    // Fails the first time only, as a dropped connection does, then applies normally.
+    let flaky = SANDBOX_TOML.replace(
+        "migrate = \"python3 apply.py\"",
+        "migrate = 'if [ ! -e {dir}/blip ]; then touch {dir}/blip; echo \"read ECONNRESET\" >&2; exit 1; fi; python3 apply.py'",
+    );
+    let r = sandbox_repo(&flaky, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        err.contains("ECONNRESET") && err.contains("again"),
+        "the first failure is shown: {err}"
+    );
+}
+
+#[test]
+fn a_head_migrate_failure_is_never_retried() {
+    // Fails once in each checkout: base is retried (set-up), head is not (its failure is the finding MG803).
+    let flaky = SANDBOX_TOML.replace(
+        "migrate = \"python3 apply.py\"",
+        "migrate = 'if [ ! -e .blip ]; then touch .blip; echo \"read ECONNRESET\" >&2; exit 1; fi; python3 apply.py'",
+    );
+    let r = sandbox_repo(&flaky, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("error   MG803"), "{out}");
+}
