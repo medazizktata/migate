@@ -31,9 +31,19 @@ Android maps API levels to SQLite versions in its own reference (API 30: 3.28; A
 device makers ship their own builds. Runtimes that bundle SQLite (Node's better-sqlite3, the Rails `sqlite3` gem's
 native builds, Python's official installers) carry their own version regardless of the OS.
 
-**Cloudflare D1 does not publish its production SQLite version.** Its full documentation (the `llms-full.txt` export,
-622 KB) mentions a SQLite version once, historically (3.24.0, `legacy_alter_table`). It has to be read from the live
-database (`select sqlite_version()`), and it can change without notice.
+**Cloudflare D1 does not publish its production SQLite version, and refuses to report it.** Its full documentation
+(the `llms-full.txt` export, 622 KB) mentions a SQLite version once, historically (3.24.0, `legacy_alter_table`).
+`sqlite_version()` and `sqlite_source_id()` are commented out of workerd's function allowlist
+(`src/workerd/util/sqlite.c++`, `ALLOWED_SQLITE_FUNCTIONS`), so a query cannot read it, locally or in production.
+What can be known (2026-11-20):
+
+- Local D1 (workerd 1.20261113.1, Wrangler's): SQLite 3.54.1. The binary's embedded source id
+  (`2026-10-16 14:45:20 555e07ef...`) is the same build migate carries.
+- Production D1: at least 3.46.0, by feature probes on one production database (owner's account): `select 1_000`
+  succeeds, and underscores in numbers arrived in 3.46.0 (change log). The exact version is not observable.
+- The allowlist matters more than the version for D1: functions outside it (`json_pretty()`, `if()`, `unistr()`) are
+  refused whatever SQLite has, and local Wrangler enforces the same list. A sandbox migrating through Wrangler fails on
+  them as production would (MG803); a sandbox migrating through another SQLite does not.
 
 ## Features by version (SQLite change log, `sqlite.org/changes.html`, checked entry by entry)
 
@@ -86,7 +96,8 @@ Both select which checks apply by the production version; neither replays migrat
 1. `target_version` under `[sandbox]` (strong_migrations' name), per engine.
 2. Postgres: C, falling back to B when that major is not installed.
 3. SQLite: A for syntax features plus B always; C when the project supplies `sqlite_bin`.
-4. Document for D1 how to read the production version, and that it can change.
+4. Document for D1 that its version cannot be read, only bounded by feature probes, and that its function
+   allowlist, enforced locally too, matters more than the version.
 
 Open: whether a feature newer than `target_version` is an error or a warning (it fails the deploy, so an error is
 consistent with MG803), and whether migrators that generate SQL at runtime should get a capture step (Postgres can log
