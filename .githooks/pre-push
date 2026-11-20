@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Before every push: nothing sensitive in the commits being pushed (scripts/check-sensitive.sh), even to a private
+# repository. Git passes one line per ref: <local ref> <local sha> <remote ref> <remote sha>.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+remote="$1"
+zero="0000000000000000000000000000000000000000"
+while read -r _ local_sha _ remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue # deleting a ref pushes no commits
+  if [ "$remote_sha" = "$zero" ]; then
+    bash scripts/check-sensitive.sh range "$local_sha" --not --remotes="$remote"
+  else
+    bash scripts/check-sensitive.sh range "$remote_sha..$local_sha"
+  fi
+done
