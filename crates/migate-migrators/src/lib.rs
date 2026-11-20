@@ -283,6 +283,8 @@ pub struct Tools {
     pub wrapper_lines: Vec<String>,
     /// Tables a host keeps in every database for itself.
     pub internal_tables: Vec<String>,
+    /// Where package managers install PostgreSQL's server programs, `{major}` standing for the major version.
+    pub postgres_bin_dirs: Vec<String>,
     /// Variables set for every sandbox command (`{dir}` is the run's database folder); the project's own values win.
     pub env: BTreeMap<String, String>,
 }

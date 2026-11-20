@@ -51,12 +51,15 @@ impl Server {
     /// `initdb` a cluster under `dir`, start it, create the `migate` database. The server process is started by
     /// `spawn`, so the caller can start and record it in one step that an interrupt's clean-up cannot fall between.
     /// `target` is production's version (`target_version`): its major's installed server is used when there is one.
+    /// `install_dirs` are where package managers put the server programs, as patterns such as
+    /// `/opt/homebrew/opt/postgresql@{major}/bin`.
     pub fn start(
         dir: &Path,
         target: Option<&str>,
+        install_dirs: &[String],
         spawn: &mut dyn FnMut(&mut Command) -> std::io::Result<Child>,
     ) -> Result<Server, String> {
-        let bin = bindir(target.map(major).transpose()?)?;
+        let bin = bindir(target.map(major).transpose()?, install_dirs)?;
         let data = dir.join("pgdata");
         let out = Command::new(bin.join("initdb"))
             .env_clear()
@@ -413,26 +416,30 @@ impl engine::Database for Db<'_> {
     }
 }
 
-/// Installed servers by major version, in the folders that keep one per version.
-fn installed() -> Vec<(u32, PathBuf)> {
-    // Homebrew keeps the server out of PATH (`pg_config` there is often libpq's); Debian and Ubuntu keep it per version.
-    let mut found: Vec<(u32, PathBuf)> = Vec::new();
-    for (root, prefix) in [
-        ("/opt/homebrew/opt", "postgresql@"),
-        ("/usr/local/opt", "postgresql@"),
-        ("/usr/lib/postgresql", ""),
-    ] {
-        for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
+/// Installed servers by major version, found through `install_dirs`: patterns such as
+/// `/opt/homebrew/opt/postgresql@{major}/bin`, where `{major}` is the version in a folder's name.
+fn installed(install_dirs: &[String]) -> Vec<(u32, PathBuf)> {
+    let mut found = Vec::new();
+    for pattern in install_dirs {
+        let Some((before, after)) = pattern.split_once("{major}") else {
+            continue;
+        };
+        let (parent, prefix) = before.rsplit_once('/').unwrap_or((".", before));
+        for entry in std::fs::read_dir(if parent.is_empty() { "/" } else { parent })
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(version) = name
+            let Some(major) = name
                 .strip_prefix(prefix)
                 .and_then(|v| v.parse::<u32>().ok())
             else {
                 continue;
             };
-            let bin = entry.path().join("bin");
+            let bin = PathBuf::from(format!("{before}{major}{after}"));
             if bin.join("postgres").is_file() {
-                found.push((version, bin));
+                found.push((major, bin));
             }
         }
     }
@@ -441,11 +448,12 @@ fn installed() -> Vec<(u32, PathBuf)> {
 
 /// Where the Postgres programs are: `MIGATE_PG_BIN`, then the installed server of major `want` (production's), then
 /// `postgres` on PATH, then the newest in the usual install folders.
-fn bindir(want: Option<u32>) -> Result<PathBuf, String> {
+fn bindir(want: Option<u32>, install_dirs: &[String]) -> Result<PathBuf, String> {
     if let Some(dir) = std::env::var_os("MIGATE_PG_BIN") {
         return Ok(PathBuf::from(dir));
     }
-    if let Some(bin) = want.and_then(|w| installed().into_iter().find(|(v, _)| *v == w)) {
+    if let Some(bin) = want.and_then(|w| installed(install_dirs).into_iter().find(|(v, _)| *v == w))
+    {
         return Ok(bin.1);
     }
     let on_path = std::env::var_os("PATH")
@@ -455,7 +463,7 @@ fn bindir(want: Option<u32>) -> Result<PathBuf, String> {
     if let Some(dir) = on_path {
         return Ok(dir);
     }
-    let mut found = installed();
+    let mut found = installed(install_dirs);
     found.sort();
     found.pop().map(|(_, bin)| bin).ok_or_else(|| {
         "no PostgreSQL server programs found (postgres, initdb): install PostgreSQL, put its bin folder on PATH, or set \

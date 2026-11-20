@@ -97,7 +97,13 @@ fn col(s: &Snapshot, table: &str, name: &str) -> migate_core::schema::Column {
 #[test]
 fn every_kind_is_read_from_a_real_server() {
     let dir = Dir::new();
-    let server = Server::start(&dir.0, None, &mut |c| c.spawn()).unwrap();
+    let server = Server::start(
+        &dir.0,
+        None,
+        &migate_migrators::tools().postgres_bin_dirs,
+        &mut |c| c.spawn(),
+    )
+    .unwrap();
     psql(&server, SCHEMA);
     let s = server.snapshot().unwrap();
     assert_eq!(s.engine(), "postgres");
@@ -256,7 +262,13 @@ fn every_kind_is_read_from_a_real_server() {
 #[test]
 fn the_database_port_counts_and_empties_a_real_server() {
     let dir = Dir::new();
-    let server = Server::start(&dir.0, None, &mut |c| c.spawn()).unwrap();
+    let server = Server::start(
+        &dir.0,
+        None,
+        &migate_migrators::tools().postgres_bin_dirs,
+        &mut |c| c.spawn(),
+    )
+    .unwrap();
     psql(
         &server,
         "create table history (name text); insert into history values ('0001'), ('0002');
@@ -287,7 +299,13 @@ fn the_database_port_counts_and_empties_a_real_server() {
 #[test]
 fn a_dropped_server_is_gone() {
     let dir = Dir::new();
-    let server = Server::start(&dir.0, None, &mut |c| c.spawn()).unwrap();
+    let server = Server::start(
+        &dir.0,
+        None,
+        &migate_migrators::tools().postgres_bin_dirs,
+        &mut |c| c.spawn(),
+    )
+    .unwrap();
     let pid = server.pid();
     drop(server);
     let alive = Command::new("kill")
@@ -321,7 +339,13 @@ fn a_stale_pid_file_never_stops_another_process() {
 #[test]
 fn objects_outside_the_model_are_listed_not_dropped() {
     let dir = Dir::new();
-    let server = Server::start(&dir.0, None, &mut |c| c.spawn()).unwrap();
+    let server = Server::start(
+        &dir.0,
+        None,
+        &migate_migrators::tools().postgres_bin_dirs,
+        &mut |c| c.spawn(),
+    )
+    .unwrap();
     psql(
         &server,
         "create extension if not exists btree_gist;

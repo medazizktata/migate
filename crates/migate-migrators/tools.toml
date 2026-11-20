@@ -25,6 +25,14 @@ internal_tables = [
   "_cf_KV", # Cloudflare D1
 ]
 
+# Where package managers install PostgreSQL's server programs, one folder per major version ({major}): Homebrew on
+# Apple silicon and on Intel, then Debian and Ubuntu. MIGATE_PG_BIN and PATH come first; these are the fallback.
+postgres_bin_dirs = [
+  "/opt/homebrew/opt/postgresql@{major}/bin",
+  "/usr/local/opt/postgresql@{major}/bin",
+  "/usr/lib/postgresql/{major}/bin",
+]
+
 # Variables set for every sandbox command, so that tools which would write under HOME write into the run instead,
 # which is removed with it ({dir} is inside the run's folder). A value the project's configuration sets wins.
 [env]

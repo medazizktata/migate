@@ -12,5 +12,9 @@ migate-core = { path = "../migate-core" }
 serde_json = "1"
 sha2 = "0.10"
 
+[dev-dependencies]
+# The integration tests find the server where the bundled tools.toml says package managers install it.
+migate-migrators = { path = "../migate-migrators" }
+
 [lints]
 workspace = true

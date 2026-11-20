@@ -72,6 +72,7 @@ pub fn run(
         Engine::Postgres => Box::new(migate_engine_postgres::Server::start(
             &dir,
             cfg.target_version.as_deref(),
+            &tools().postgres_bin_dirs,
             &mut |command| {
                 let mut l = live();
                 let child = command.spawn()?;
