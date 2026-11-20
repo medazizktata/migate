@@ -2033,21 +2033,22 @@ fn a_trigger_that_refuses_a_row_the_database_holds_is_an_error_with_the_count() 
     assert_eq!(code, 2, "{out}");
     assert!(
         out.contains("error   MG503  main.users.needs_legacy")
-            && out.contains("1 of the 2 rows")
+            && out.contains("1 of the 2 rows the database holds would already be refused")
             && out.contains("legacy required"),
         "{out}"
     );
 }
 
 #[test]
-fn a_trigger_that_refuses_no_row_the_database_holds_is_a_warning() {
+fn a_trigger_no_stored_row_breaks_stays_an_error() {
     let (code, out) = trigger_run(
         &format!("{INIT}\n{TWO_USERS}"),
         "CREATE TRIGGER no_zzz BEFORE INSERT ON users WHEN new.legacy = 'zzz' BEGIN SELECT RAISE(ABORT, 'no zzz'); END;",
     );
-    assert_eq!(code, 0, "{out}");
+    assert_eq!(code, 2, "{out}");
     assert!(
-        out.contains("warning MG503  main.users.no_zzz") && out.contains("none of the 2 rows"),
+        out.contains("error   MG503  main.users.no_zzz")
+            && !out.contains("would already be refused"),
         "{out}"
     );
 }
@@ -2060,7 +2061,8 @@ fn a_trigger_on_an_empty_table_stays_an_error() {
     );
     assert_eq!(code, 2, "{out}");
     assert!(
-        out.contains("error   MG503  main.users.no_zzz") && out.contains("no rows to judge it by"),
+        out.contains("error   MG503  main.users.no_zzz")
+            && !out.contains("would already be refused"),
         "{out}"
     );
 }
@@ -2073,9 +2075,10 @@ fn a_row_written_back_is_not_refused_as_its_own_duplicate() {
         "CREATE TRIGGER one_email BEFORE INSERT ON users WHEN EXISTS (SELECT 1 FROM users u WHERE u.email = new.email)
          BEGIN SELECT RAISE(ABORT, 'email taken'); END;",
     );
-    assert_eq!(code, 0, "{out}");
+    assert_eq!(code, 2, "{out}");
     assert!(
-        out.contains("warning MG503  main.users.one_email") && out.contains("none of the 2 rows"),
+        out.contains("error   MG503  main.users.one_email")
+            && !out.contains("would already be refused"),
         "{out}"
     );
 }
@@ -2092,9 +2095,10 @@ CREATE TRIGGER no_deletes BEFORE DELETE ON users BEGIN SELECT RAISE(ABORT, 'neve
         &first,
         "CREATE TRIGGER no_zzz BEFORE INSERT ON users WHEN new.legacy = 'zzz' BEGIN SELECT RAISE(ABORT, 'no zzz'); END;",
     );
-    assert_eq!(code, 0, "{out}");
+    assert_eq!(code, 2, "{out}");
     assert!(
-        out.contains("warning MG503  main.users.no_zzz") && out.contains("none of the 2 rows"),
+        out.contains("error   MG503  main.users.no_zzz")
+            && !out.contains("would already be refused"),
         "{out}"
     );
 }
@@ -2121,7 +2125,7 @@ fn each_kind_of_trigger_event_is_judged() {
         (
             "ignored",
             "BEFORE INSERT ON users WHEN new.legacy IS NULL BEGIN SELECT RAISE(IGNORE); END",
-            "silently ignored",
+            "did not stay written",
         ),
         (
             "rolled_back",
@@ -2133,7 +2137,7 @@ fn each_kind_of_trigger_event_is_judged() {
         assert_eq!(code, 2, "{name}: {out}");
         assert!(
             out.contains(&format!("error   MG503  main.users.{name}"))
-                && out.contains("1 of the 2 rows")
+                && out.contains("1 of the 2 rows the database holds would already be refused")
                 && out.contains(refusal),
             "{name}: {out}"
         );
@@ -2168,7 +2172,7 @@ CREATE TRIGGER prices_ok BEFORE INSERT ON prices WHEN new.gross > 1000 BEGIN SEL
             .unwrap_or_else(|| panic!("{table}: {out}"));
         assert!(
             line.starts_with("error   MG503")
-                && line.contains("1 of the 2 rows")
+                && line.contains("1 of the 2 rows the database holds would already be refused")
                 && line.contains(refusal),
             "{line}"
         );
@@ -2196,7 +2200,9 @@ DROP TRIGGER gone;",
             .to_string()
     };
     assert!(
-        line("guard").starts_with("error   MG504") && line("guard").contains("1 of the 2 rows"),
+        line("guard").starts_with("error   MG504")
+            && line("guard")
+                .contains("1 of the 2 rows the database holds would already be refused"),
         "{out}"
     );
     assert!(
@@ -2214,7 +2220,7 @@ create trigger no_zzz before insert on users for each row when (new.email = 'zzz
     let (code, out, err) = sandbox_check(&r, &[]);
     assert_eq!(code, 2, "{out}{err}");
     assert!(
-        out.contains("error   MG503") && out.contains("not built for PostgreSQL yet"),
+        out.contains("error   MG503") && !out.contains("would already be refused"),
         "{out}"
     );
 }
@@ -2231,9 +2237,7 @@ PRAGMA ignore_check_constraints = ON; INSERT INTO stock VALUES (1, -5); PRAGMA i
     );
     assert_eq!(code, 2, "{out}");
     assert!(
-        out.contains("error   MG503  main.stock.cap")
-            && out.contains("failed outside the trigger")
-            && out.contains("CHECK"),
+        out.contains("error   MG503  main.stock.cap") && !out.contains("would already be refused"),
         "{out}"
     );
 }
@@ -2246,7 +2250,74 @@ fn a_trigger_on_a_view_stays_an_error() {
     );
     assert_eq!(code, 2, "{out}");
     assert!(
-        out.contains("error   MG503  main.people.people_in") && out.contains("a trigger on a view"),
+        out.contains("error   MG503  main.people.people_in")
+            && !out.contains("would already be refused"),
         "{out}"
+    );
+}
+
+#[test]
+fn a_trigger_naming_its_table_in_another_case_is_judged_not_fatal() {
+    // SQLite names are case-insensitive; the trigger keeps the table's name as written in its own SQL.
+    let (code, out) = trigger_run(
+        &format!("{INIT}\n{TWO_USERS}"),
+        "CREATE TRIGGER g BEFORE INSERT ON USERS WHEN new.legacy IS NULL BEGIN SELECT RAISE(ABORT, 'legacy required'); END;
+",
+    );
+    assert_ne!(code, 3, "the run must not be lost: {out}");
+    assert!(
+        out.contains("error   MG503") && out.contains("legacy required"),
+        "{out}"
+    );
+}
+
+#[test]
+fn rows_that_satisfy_a_trigger_do_not_clear_it_when_the_old_app_writes_differently() {
+    // The migration fills a new column and requires it: every stored row passes, every insert from the old app (which
+    // does not know the column) is refused. Rows the database holds cannot vouch for the old app's writes.
+    let (code, out) = trigger_run(
+        &format!("{INIT}\n{TWO_USERS}"),
+        "ALTER TABLE users ADD COLUMN tenant TEXT; UPDATE users SET tenant = 't1';
+CREATE TRIGGER need_tenant BEFORE INSERT ON users WHEN new.tenant IS NULL BEGIN SELECT RAISE(ABORT, 'tenant required'); END;",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(
+        out.contains("error   MG503  main.users.need_tenant"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_column_named_rowid_does_not_make_up_refusals() {
+    // The table's own `rowid` column hides SQLite's row id under that name; the probe must find rows by another alias.
+    let (code, out) = trigger_run(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE t (rowid TEXT, v TEXT); INSERT INTO t VALUES (NULL, 'ok'), (NULL, 'ok2');",
+        "CREATE TRIGGER never BEFORE INSERT ON t WHEN new.v = 'never' BEGIN SELECT RAISE(ABORT, 'never'); END;",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(
+        out.contains("error   MG503  main.t.never") && !out.contains("would already be refused"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_trigger_that_undoes_a_write_is_described_as_such() {
+    // No RAISE in the body: the row is written, then deleted by the trigger itself.
+    let (code, out) = trigger_run(
+        &format!("{INIT}\n{TWO_USERS}"),
+        "CREATE TRIGGER undo AFTER INSERT ON users WHEN new.legacy IS NULL BEGIN DELETE FROM users WHERE id = new.id; END;",
+    );
+    assert_eq!(code, 2, "{out}");
+    let line = out
+        .lines()
+        .find(|l| l.contains("main.users.undo"))
+        .unwrap_or_default();
+    assert!(
+        line.contains("1 of the 2 rows")
+            && line.contains("did not stay written")
+            && !line.contains("RAISE(IGNORE)"),
+        "{line}"
     );
 }

@@ -321,7 +321,7 @@ pub fn run(
         .collect();
     let changes = diff(&before, &after);
     findings.extend(classify_with(&changes, &filled));
-    judge_triggers(&mut findings, &changes, db.as_ref())?;
+    judge_triggers(&mut findings, &changes, db.as_ref());
     let unmodelled_after = db.unmodelled()?;
     for key in unmodelled_before
         .keys()
@@ -516,14 +516,11 @@ fn sh(command: &str, dir: &Path, env: &BTreeMap<String, String>) -> Result<Outpu
     out
 }
 
-/// A new or changed trigger's rule is judged by the rows its table holds: an error with the count if any would be
-/// refused if written again, a warning if rows exist and none would be, and an error still when there are no rows or
-/// the rows cannot judge it (the default is that the old app writes every table).
-fn judge_triggers(
-    findings: &mut [Finding],
-    changes: &[Change],
-    db: &dyn Database,
-) -> Result<(), String> {
+/// Evidence for a new or changed trigger's rule, never a reason to soften it: when rows the database already holds would
+/// be refused if written again, the error says how many and why. Stored rows cannot show the opposite, that the old
+/// app's writes pass: a migration that fills a new column and then requires it satisfies every stored row and refuses
+/// every insert from the old app (seen on a real app, and in a blind test). A probe that cannot judge adds nothing.
+fn judge_triggers(findings: &mut [Finding], changes: &[Change], db: &dyn Database) {
     for change in changes {
         let o = match change {
             Change::Added(o) | Change::Changed { head: o, .. } => o,
@@ -539,35 +536,23 @@ fn judge_triggers(
         else {
             continue;
         };
-        let of = |checked: u64, held: u64| {
-            if checked == held {
+        if let Ok(TriggerProbe::Refused {
+            refused,
+            checked,
+            held,
+            message,
+        }) = db.probe_trigger(table, &o.name)
+        {
+            let of = if checked == held {
                 format!("the {held} rows")
             } else {
                 format!("the first {checked} of the {held} rows")
-            }
-        };
-        match db.probe_trigger(table, &o.name)? {
-            TriggerProbe::Refused { refused, checked, held, message } => f.message.push_str(&format!(
-                "; {refused} of {} the database holds would be refused if written again: \"{message}\"",
-                of(checked, held)
-            )),
-            TriggerProbe::Accepted { checked, held } => {
-                f.severity = Severity::Warning;
-                f.message.push_str(&format!(
-                    "; none of {} the database holds would be refused if written again (they come from the \
-                     migrations, the seed and the base tests: production may hold others)",
-                    of(checked, held)
-                ));
-            }
-            TriggerProbe::NoRows => f
-                .message
-                .push_str("; the table holds no rows to judge it by (a seed adds some), so it stays an error"),
-            TriggerProbe::Unknown(why) => {
-                f.message.push_str(&format!("; it could not be judged by the rows ({why}), so it stays an error"));
-            }
+            };
+            f.message.push_str(&format!(
+                "; {refused} of {of} the database holds would already be refused if written again: \"{message}\""
+            ));
         }
     }
-    Ok(())
 }
 
 /// The rows the database held when the head migrations ran (the base migrations', the seed's and the base tests'):

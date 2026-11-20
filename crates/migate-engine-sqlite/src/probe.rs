@@ -17,7 +17,7 @@ pub fn probe_trigger(path: &Path, table: &str, trigger: &str) -> Result<TriggerP
     let db = copy_of(&[("main", path)])?;
     let sql: Option<String> = db
         .query_row(
-            "SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?1 AND tbl_name = ?2",
+            "SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?1 AND tbl_name = ?2 COLLATE NOCASE",
             [trigger, table],
             |r| r.get(0),
         )
@@ -55,7 +55,7 @@ pub fn probe_trigger(path: &Path, table: &str, trigger: &str) -> Result<TriggerP
         .map(|c| c.0.as_str())
         .collect();
     let without_rowid: bool = db.query_row(
-        "SELECT wr FROM pragma_table_list WHERE schema = 'main' AND name = ?1",
+        "SELECT wr FROM pragma_table_list WHERE schema = 'main' AND name = ?1 COLLATE NOCASE",
         [table],
         |r| r.get::<_, i64>(0),
     )? != 0;
@@ -70,7 +70,16 @@ pub fn probe_trigger(path: &Path, table: &str, trigger: &str) -> Result<TriggerP
     let key: Vec<String> = if without_rowid {
         key_columns.iter().map(|(_, c)| quoted(c)).collect()
     } else {
-        vec!["rowid".into()]
+        // A column of the table's own may be called rowid, oid or _rowid_; the row id answers to any name left free.
+        let free = ["rowid", "oid", "_rowid_"]
+            .into_iter()
+            .find(|alias| !columns.iter().any(|c| c.0.eq_ignore_ascii_case(alias)));
+        let Some(alias) = free else {
+            return Ok(TriggerProbe::Unknown(
+                "the table's columns take every name of the row id".into(),
+            ));
+        };
+        vec![alias.into()]
     };
     let t = quoted(table);
     let list = |cols: &[String]| cols.join(", ");
@@ -136,11 +145,15 @@ pub fn probe_trigger(path: &Path, table: &str, trigger: &str) -> Result<TriggerP
             if has("INSERT") || has("DELETE") {
                 db.execute(&delete, params_from_iter(k))?;
                 if db.query_row(&count, params_from_iter(k), |r| r.get::<_, i64>(0))? != 0 {
-                    return Ok(Some("the delete was silently ignored (RAISE(IGNORE))"));
+                    return Ok(Some(
+                        "the row was not deleted (the trigger ignored or undid the delete)",
+                    ));
                 }
                 db.execute(&insert, params_from_iter(&row[from..]))?;
                 if db.query_row(&count, params_from_iter(k), |r| r.get::<_, i64>(0))? == 0 {
-                    return Ok(Some("the write was silently ignored (RAISE(IGNORE))"));
+                    return Ok(Some(
+                        "the row did not stay written (the trigger ignored or undid the write)",
+                    ));
                 }
             }
             Ok(None)
