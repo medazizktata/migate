@@ -776,6 +776,10 @@ ALTER TABLE users_new RENAME TO users;";
     let (code, out, err) = sandbox_check(&r, &[]);
     assert_eq!(code, 2, "{out}{err}");
     assert!(
+        !out.contains("MG106"),
+        "lost rows are reported once, not again per column: {out}"
+    );
+    assert!(
         out.contains("MG105")
             && out.contains("main.posts")
             && out.contains("1 rows before the migrations, 0 after"),
@@ -1487,4 +1491,70 @@ fn findings_the_sandbox_did_not_need_survive_when_it_cannot_check() {
     assert_eq!(v["outcome"], "could-not-check");
     assert!(v["error"].as_str().unwrap().contains("MG813"), "{v}");
     assert_eq!(v["findings"][0]["rule"], "MG004", "{v}");
+}
+
+#[test]
+fn sandbox_catches_values_a_migration_blanks_without_losing_rows() {
+    let seeded = SANDBOX_TOML.replace("test = ", "seed = \"python3 seed.py\"\ntest = ");
+    // The base migration leaves a row with a legacy value; the change blanks it but deletes nothing.
+    let r = sandbox_repo_full(
+        &seeded,
+        OLD_APP,
+        &format!("{INIT}\nINSERT INTO users (id, email, legacy) VALUES (1, 'a@b', 'kept');"),
+        "UPDATE users SET legacy = NULL;",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG106") && out.contains("main.users.legacy"),
+        "{out}"
+    );
+}
+
+#[test]
+fn sandbox_catches_a_rebuild_that_nulls_children_through_set_null() {
+    // The dogfood's case: a faithful parent rebuild, but the child's ON DELETE SET NULL blanks its reference.
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users ON DELETE SET NULL);";
+    let rebuild = "CREATE TABLE users_new (id INTEGER PRIMARY KEY, email TEXT, legacy TEXT);
+INSERT INTO users_new SELECT id, email, legacy FROM users;
+DROP TABLE users;
+ALTER TABLE users_new RENAME TO users;";
+    let seeded = SANDBOX_TOML.replace("test = ", "seed = \"python3 seed.py\"\ntest = ");
+    let r = sandbox_repo_full(&seeded, OLD_APP, first, rebuild);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG106") && out.contains("main.posts.user_id"),
+        "{out}"
+    );
+    assert!(!out.contains("MG105"), "no row was lost: {out}");
+}
+
+#[test]
+fn postgres_labels_lost_values_with_their_schema() {
+    let r = Repo::new();
+    r.write("migate.toml", PG_TOML);
+    r.write("apply.sh", PG_APPLY);
+    r.write("old_app.sh", PG_OLD_APP);
+    r.write(
+        "migrations/0001_init.sql",
+        "create table users (id serial primary key, email text not null, legacy text);
+insert into users (email, legacy) values ('a@b', 'kept');",
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write(
+        "migrations/0002_change.sql",
+        "update users set legacy = null;",
+    );
+    r.commit("blank");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG106")
+            && out.contains("public.users.legacy")
+            && !out.contains("main.public"),
+        "{out}"
+    );
 }

@@ -245,6 +245,7 @@ pub fn run(
         }
     }
     let rows_before = db.row_counts()?;
+    let values_before = db.value_counts()?;
 
     eprintln!("migate: migrating it to HEAD");
     let out = sh(&migrate, &head_dir, &migrate_env)?;
@@ -264,6 +265,7 @@ pub fn run(
         ));
     }
     findings.extend(classify(&diff(&before, &after)));
+    let mut lost_rows = BTreeSet::new();
     for (table, now) in db.row_counts()? {
         if let Some(&was) = rows_before.get(&table)
             && now < was
@@ -271,8 +273,24 @@ pub fn run(
             findings.push(Finding::new(
                 "MG105",
                 Severity::Error,
-                format!("main.{table}"),
+                table.clone(),
                 format!("{was} rows before the migrations, {now} after"),
+            ));
+            lost_rows.insert(table);
+        }
+    }
+    // Values a migration blanked without losing a row; a table that lost rows is already reported.
+    for (column, now) in db.value_counts()? {
+        let table = column.rsplit_once('.').map_or(column.as_str(), |(t, _)| t);
+        if let Some(&was) = values_before.get(&column)
+            && now < was
+            && !lost_rows.contains(table)
+        {
+            findings.push(Finding::new(
+                "MG106",
+                Severity::Error,
+                column.clone(),
+                format!("{was} values before the migrations, {now} after"),
             ));
         }
     }

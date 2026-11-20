@@ -239,6 +239,58 @@ impl engine::Database for Db<'_> {
             .collect())
     }
 
+    fn value_counts(&self) -> Result<BTreeMap<String, u64>, String> {
+        let columns = rows(
+            &self.0.bin,
+            &self.0.url,
+            &format!(
+                "select n.nspname as ns, c.relname as tbl, a.attname as col \
+             from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace \
+             where {TABLE} and a.attnum > 0 and not a.attisdropped and {USER_SCHEMA} order by 1, 2, a.attnum"
+            ),
+        )?;
+        let mut by_table: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+        for c in &columns {
+            by_table
+                .entry((s(c, "ns").into(), s(c, "tbl").into()))
+                .or_default()
+                .push(s(c, "col").into());
+        }
+        if by_table.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        // One query for every table: per table, a JSON object of column -> non-NULL count.
+        let parts: Vec<String> = by_table
+            .iter()
+            .map(|((ns, tbl), cols)| {
+                let fields: Vec<String> = cols
+                    .iter()
+                    .map(|c| format!("{}, count({})", literal(c), quoted(c)))
+                    .collect();
+                format!(
+                    "select {} as ns, {} as tbl, json_build_object({}) as counts from {}.{}",
+                    literal(ns),
+                    literal(tbl),
+                    fields.join(", "),
+                    quoted(ns),
+                    quoted(tbl)
+                )
+            })
+            .collect();
+        let mut counts = BTreeMap::new();
+        for r in rows(&self.0.bin, &self.0.url, &parts.join(" union all "))? {
+            if let Some(cols) = r["counts"].as_object() {
+                for (col, n) in cols {
+                    counts.insert(
+                        format!("{}.{}.{col}", s(&r, "ns"), s(&r, "tbl")),
+                        n.as_u64().unwrap_or(0),
+                    );
+                }
+            }
+        }
+        Ok(counts)
+    }
+
     fn drop_all_but(&self, keep: &str) -> Result<(), String> {
         let kept: BTreeSet<String> = keep
             .split(|c: char| !(c.is_alphanumeric() || c == '_'))
@@ -377,6 +429,11 @@ fn names(row: &Value, key: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A SQL string literal.
+fn literal(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
 }
 
 fn quoted(ident: &str) -> String {

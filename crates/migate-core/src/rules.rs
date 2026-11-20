@@ -84,6 +84,12 @@ pub const RULES: &[Rule] = &[
         axes: "D",
     },
     Rule {
+        id: "MG106",
+        name: "values-lost",
+        description: "A column holds fewer values after the migration than before, though no row was lost: an UPDATE that blanks it, or a parent rebuild whose ON DELETE SET NULL children lose their reference.",
+        axes: "D",
+    },
+    Rule {
         id: "MG201",
         name: "drop-column",
         description: "A column was dropped. The running app still selects or inserts it, and its values are gone. Stop using it in one release, drop it in the next.",

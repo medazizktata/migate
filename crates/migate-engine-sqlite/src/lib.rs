@@ -112,7 +112,40 @@ pub fn row_counts(path: &Path) -> Result<BTreeMap<String, u64>, Error> {
         let n: i64 = copy.query_row(&format!("SELECT count(*) FROM {}", quoted(&t)), [], |r| {
             r.get(0)
         })?;
-        counts.insert(t, u64::try_from(n).unwrap_or(0));
+        counts.insert(format!("main.{t}"), u64::try_from(n).unwrap_or(0));
+    }
+    Ok(counts)
+}
+
+/// Every column's count of non-NULL values in the database at `path`, by `main.table.column`.
+pub fn value_counts(path: &Path) -> Result<BTreeMap<String, u64>, Error> {
+    check_file(path)?;
+    let copy = copy_of(&[("main", path)])?;
+    let tables: Vec<String> = copy
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    let mut counts = BTreeMap::new();
+    for t in tables {
+        let columns: Vec<String> = copy
+            .prepare("SELECT name FROM pragma_table_info(?1)")?
+            .query_map([&t], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        if columns.is_empty() {
+            continue;
+        }
+        let list: Vec<String> = columns
+            .iter()
+            .map(|c| format!("count({})", quoted(c)))
+            .collect();
+        let row: Vec<i64> = copy.query_row(
+            &format!("SELECT {} FROM {}", list.join(", "), quoted(&t)),
+            [],
+            |r| (0..columns.len()).map(|i| r.get(i)).collect(),
+        )?;
+        for (c, n) in columns.iter().zip(row) {
+            counts.insert(format!("main.{t}.{c}"), u64::try_from(n).unwrap_or(0));
+        }
     }
     Ok(counts)
 }
@@ -764,6 +797,9 @@ impl engine::Database for File {
     }
     fn row_counts(&self) -> Result<BTreeMap<String, u64>, String> {
         row_counts(&self.0).map_err(|e| e.0)
+    }
+    fn value_counts(&self) -> Result<BTreeMap<String, u64>, String> {
+        value_counts(&self.0).map_err(|e| e.0)
     }
     fn drop_all_but(&self, keep: &str) -> Result<(), String> {
         drop_all_but(&self.0, keep).map_err(|e| e.0)

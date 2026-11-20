@@ -41,7 +41,7 @@ base = "origin/main"
 [sandbox]
 env = { DATABASE_URL = "file:{db}" }   # the variable your project reads; {db} is the throwaway database's path
 setup = "npm ci"                       # run in each checkout first
-seed = "npm run seed"                  # optional: rows, so a migration that loses them is caught
+seed = "npm run seed"                  # optional: rows, so a migration that loses rows or values is caught
 test = "npm test"                      # the base version's tests: run on base's own database, at head, and on an
                                        # emptied copy, so a run that never used the database is "not checked"
 ```

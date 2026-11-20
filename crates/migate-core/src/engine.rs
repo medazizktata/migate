@@ -25,8 +25,11 @@ pub trait Database {
     fn snapshot(&self) -> Result<Snapshot, String>;
     /// How many rows `sql` returns (the migrator's history query).
     fn count_rows(&self, sql: &str) -> Result<usize, String>;
-    /// Every table's row count, by table name.
+    /// Every table's row count, by `namespace.table`.
     fn row_counts(&self) -> Result<BTreeMap<String, u64>, String>;
+    /// Every column's count of non-NULL values, by `namespace.table.column`: what a migration can blank without losing
+    /// a row.
+    fn value_counts(&self) -> Result<BTreeMap<String, u64>, String>;
     /// Drop every table and view not named in `keep` (a query, such as the history query). Throwaway databases only.
     fn drop_all_but(&self, keep: &str) -> Result<(), String>;
 }
