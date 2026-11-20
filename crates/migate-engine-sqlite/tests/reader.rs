@@ -482,3 +482,18 @@ fn a_shorter_declared_length_is_not_narrowing_on_sqlite() {
         .collect();
     assert_eq!(rules, ["MG206"]);
 }
+
+#[test]
+fn a_virtual_tables_module_and_arguments_are_listed_outside_the_model() {
+    // The model sees a virtual table's columns, not its module or arguments (an FTS5 tokenizer, say).
+    let sb = build(
+        "CREATE VIRTUAL TABLE docs USING fts5(title, body, tokenize = 'porter'); CREATE TABLE t (a);",
+    );
+    assert!(
+        snapshot(sb.db_path()).is_ok(),
+        "the bundled SQLite reads an FTS5 table"
+    );
+    let got = migate_engine_sqlite::unmodelled(sb.db_path()).unwrap();
+    assert_eq!(got.keys().collect::<Vec<_>>(), ["virtual table main.docs"]);
+    assert!(got["virtual table main.docs"].contains("porter"), "{got:?}");
+}

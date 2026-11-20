@@ -117,6 +117,18 @@ pub fn row_counts(path: &Path) -> Result<BTreeMap<String, u64>, Error> {
     Ok(counts)
 }
 
+/// What the model does not cover in the database at `path`, as `category name` -> definition: a virtual table's module
+/// and arguments (its columns are modelled).
+pub fn unmodelled(path: &Path) -> Result<BTreeMap<String, String>, Error> {
+    check_file(path)?;
+    let copy = copy_of(&[("main", path)])?;
+    let found = copy
+        .prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'")?
+        .query_map([], |r| Ok((format!("virtual table main.{}", r.get::<_, String>(0)?), squash(&r.get::<_, String>(1)?))))?
+        .collect::<Result<_, _>>()?;
+    Ok(found)
+}
+
 /// Every column's count of non-NULL values in the database at `path`, by `main.table.column`.
 pub fn value_counts(path: &Path) -> Result<BTreeMap<String, u64>, Error> {
     check_file(path)?;
@@ -166,7 +178,8 @@ pub fn drop_all_but(path: &Path, keep: &str) -> Result<(), Error> {
     for (kind, name) in objects {
         if !kept.contains(&name.to_ascii_lowercase()) {
             conn.execute_batch(&format!(
-                "DROP {} {};",
+                // IF EXISTS: dropping a virtual table drops its shadow tables, still listed here.
+                "DROP {} IF EXISTS {};",
                 kind.to_ascii_uppercase(),
                 quoted(&name)
             ))?;
@@ -789,10 +802,8 @@ impl engine::Sandbox for Throwaway {
 struct File(PathBuf);
 
 impl engine::Database for File {
-    // shortcut: SQLite objects outside the model (virtual tables, table options) are not listed yet; list them when
-    // a project's migration is seen to change one.
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
-        Ok(BTreeMap::new())
+        unmodelled(&self.0).map_err(|e| e.0)
     }
     fn snapshot(&self) -> Result<Snapshot, String> {
         snapshot(&self.0).map_err(|e| e.0)

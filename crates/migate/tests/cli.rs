@@ -1859,3 +1859,18 @@ fn interrupt_as_initdb_finishes(attempt: u32) -> bool {
     }
     alive
 }
+
+#[test]
+fn sqlite_names_a_changed_virtual_table_as_not_checked() {
+    let r = sandbox_repo_full(
+        SANDBOX_TOML,
+        OLD_APP,
+        &format!("{INIT}\nCREATE VIRTUAL TABLE docs USING fts5(title, body, tokenize = 'porter');"),
+        "DROP TABLE docs;\nCREATE VIRTUAL TABLE docs USING fts5(title, body, tokenize = 'unicode61');",
+    );
+    let (_, out, err) = sandbox_check(&r, &[]);
+    assert!(
+        out.contains("MG801") && out.contains("virtual table main.docs"),
+        "{out}{err}"
+    );
+}
