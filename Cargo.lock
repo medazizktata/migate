@@ -519,6 +519,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "migate-engine-postgres"
+version = "0.0.0"
+dependencies = [
+ "migate-core",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "migate-engine-sqlite"
 version = "0.0.0"
 dependencies = [

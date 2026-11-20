@@ -1,0 +1,16 @@
+[package]
+name = "migate-engine-postgres"
+description = "migate's PostgreSQL engine: a throwaway local server and a catalog reader into the canonical snapshot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+migate-core = { path = "../migate-core" }
+serde_json = "1"
+sha2 = "0.10"
+
+[lints]
+workspace = true
