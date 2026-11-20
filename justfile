@@ -34,3 +34,11 @@ doctor:
 # Mutation testing on one crate (default migate-core); extra arguments go to cargo-mutants. See scripts/mutants.sh.
 mutants crate="migate-core" *args:
     bash scripts/mutants.sh {{crate}} {{args}}
+
+# Prepare release X.Y.Z locally (checks, version, CHANGELOG.md, commit, tag); nothing is pushed. See docs/releasing.md.
+release version:
+    bash scripts/release.sh {{version}}
+
+# Push main and its release tags; a new tag runs the release workflow.
+publish:
+    git push --follow-tags origin main
