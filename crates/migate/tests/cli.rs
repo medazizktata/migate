@@ -2321,3 +2321,38 @@ fn a_trigger_that_undoes_a_write_is_described_as_such() {
         "{line}"
     );
 }
+
+#[test]
+fn a_trigger_error_prints_the_marker_that_accepts_it() {
+    let trigger = "CREATE TRIGGER no_zzz BEFORE INSERT ON users WHEN new.legacy = 'zzz' BEGIN SELECT RAISE(ABORT, 'no zzz'); END;";
+    let (code, out) = trigger_run(&format!("{INIT}\n{TWO_USERS}"), trigger);
+    assert_eq!(code, 2, "{out}");
+    let line = out
+        .lines()
+        .find(|l| l.contains("main.users.no_zzz"))
+        .unwrap_or_default();
+    let start = line
+        .find("`migate: contract")
+        .unwrap_or_else(|| panic!("no marker offered: {line}"))
+        + 1;
+    let marker = &line[start..start + line[start..].find('`').unwrap()];
+    assert_eq!(
+        marker,
+        "migate: contract add-trigger users.no_zzz -- <why the old app never writes a row it refuses>"
+    );
+    // Pasted into the migration with a reason, it accepts the finding.
+    let pasted = marker.replace(
+        "<why the old app never writes a row it refuses>",
+        "the old app never sets legacy",
+    );
+    let (code, out) = trigger_run(
+        &format!("{INIT}\n{TWO_USERS}"),
+        &format!("-- {pasted}\n{trigger}"),
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("note    MG503  main.users.no_zzz")
+            && out.contains("accepted by the contract"),
+        "{out}"
+    );
+}

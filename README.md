@@ -61,6 +61,18 @@ ALTER TABLE users DROP COLUMN legacy;
 The finding stays in the report as a note. A marker with no reason, or one that matches nothing, is an error (MG901),
 and nothing accepts a failing old-version test.
 
+Triggers a migration adds or changes are always errors (MG503, MG504): nothing migate can see proves the running app
+never writes what a new trigger refuses. Not the rows the database already holds, either: a migration that fills a new
+column and then requires it passes every stored row and refuses every insert from the old app. When stored rows would
+already be refused, the error says how many. Each trigger error prints the marker that accepts it, ready to copy; the
+reason is the reviewer's answer to the one question that matters:
+
+```sql
+-- migate: contract add-trigger users.need_tenant -- the old app has sent a tenant on every insert since v41
+```
+
+The marker is read in any comment style, so a TypeScript migration (Payload, Drizzle) uses `//`.
+
 For Cloudflare D1, migate runs `wrangler d1 migrations apply --local` into its own folder and finds the database
 there; it only needs the database's name from your wrangler configuration:
 

@@ -552,6 +552,17 @@ fn judge_triggers(findings: &mut [Finding], changes: &[Change], db: &dyn Databas
                 "; {refused} of {of} the database holds would already be refused if written again: \"{message}\""
             ));
         }
+        // The error stays; accepting an intended trigger is one reviewed line, printed ready to copy.
+        let rule_name = if f.rule == "MG503" {
+            "add-trigger"
+        } else {
+            "drop-or-change-trigger"
+        };
+        f.message.push_str(&format!(
+            "; to accept it, add to the migration `migate: contract {rule_name} {table}.{} -- <why the old app never \
+             writes a row it refuses>`",
+            o.name
+        ));
     }
 }
 
