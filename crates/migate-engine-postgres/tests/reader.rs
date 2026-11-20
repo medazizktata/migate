@@ -312,3 +312,79 @@ fn a_stale_pid_file_never_stops_another_process() {
     other.kill().unwrap();
     other.wait().unwrap();
 }
+
+#[test]
+fn objects_outside_the_model_are_listed_not_dropped() {
+    let dir = Dir::new();
+    let server = Server::start(&dir.0, &mut |_| {}).unwrap();
+    psql(
+        &server,
+        "create extension if not exists btree_gist;
+         create table rooms (id int primary key, during tstzrange, owner text,
+           exclude using gist (id with =, during with &&));
+         create domain email as text check (value like '%@%');
+         create type pair as (a int, b int);
+         create type floatrange as range (subtype = float8);
+         create aggregate total(int) (sfunc = int4pl, stype = int);
+         create materialized view busy as select id from rooms;
+         create index busy_id on busy (id);
+         create view rooms_v as select * from rooms;
+         create function noop() returns trigger language plpgsql as $$ begin return null; end $$;
+         create trigger rooms_v_ins instead of insert on rooms_v for each row execute function noop();
+         create rule rooms_log as on update to rooms do also select 1;
+         create policy own on rooms using (owner = current_user);
+         alter table rooms enable row level security;
+         create statistics rooms_st on id, owner from rooms;
+         create collation ci (provider = icu, locale = 'und-u-ks-level2', deterministic = false);
+         create table child () inherits (rooms);
+         create index rooms_owner_inc on rooms (owner) include (during);
+         create role reader_role; grant select on rooms to reader_role;",
+    );
+    let db = server.open("select 1").unwrap();
+    let got = db.unmodelled().unwrap();
+    for key in [
+        "exclusion constraint public.rooms.rooms_id_during_excl",
+        "domain public.email",
+        "composite type public.pair",
+        "range type public.floatrange",
+        "aggregate public.total(integer)",
+        "index on a materialized view public.busy.busy_id",
+        "trigger on a view public.rooms_v.rooms_v_ins",
+        "rule public.rooms.rooms_log",
+        "row-level security public.rooms",
+        "policy public.rooms.own",
+        "statistics public.rooms_st",
+        "collation public.ci",
+        "inheritance public.child",
+        "index with INCLUDE columns public.rooms.rooms_owner_inc",
+        "grants public.rooms",
+    ] {
+        assert!(
+            got.contains_key(key),
+            "missing {key}: {:#?}",
+            got.keys().collect::<Vec<_>>()
+        );
+    }
+    let s = server.snapshot().unwrap();
+    let routines: Vec<&str> = s
+        .objects()
+        .iter()
+        .filter(|o| o.kind() == Kind::Routine)
+        .map(|o| o.name.as_str())
+        .collect();
+    assert_eq!(
+        routines,
+        ["noop()"],
+        "a range type's constructors are the type's, not the project's"
+    );
+    let _ = Command::new("psql")
+        .args([
+            "-X",
+            "-q",
+            "-d",
+            server.url(),
+            "-c",
+            "drop owned by reader_role; drop role reader_role",
+        ])
+        .output();
+}

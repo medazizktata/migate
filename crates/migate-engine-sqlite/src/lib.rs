@@ -789,6 +789,11 @@ impl engine::Sandbox for Throwaway {
 struct File(PathBuf);
 
 impl engine::Database for File {
+    // shortcut: SQLite objects outside the model (virtual tables, table options) are not listed yet; list them when
+    // a project's migration is seen to change one.
+    fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
+        Ok(BTreeMap::new())
+    }
     fn snapshot(&self) -> Result<Snapshot, String> {
         snapshot(&self.0).map_err(|e| e.0)
     }

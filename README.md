@@ -81,6 +81,10 @@ env = { DATABASE_URL = "{url}" }   # postgresql://migate@127.0.0.1:<free port>/m
 test = "pnpm test"
 ```
 
+The schema diff covers tables, columns, keys, constraints, indexes, views, triggers, routines, enums and sequences.
+A change to anything else (a policy, a grant, a domain, an exclusion constraint, a partition and the like) is named
+as not checked (MG801): only the base version's tests judged it.
+
 Migrate commands that use `npx` never download a package the project does not have.
 
 Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--format sarif` for machines.

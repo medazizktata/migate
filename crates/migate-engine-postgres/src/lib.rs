@@ -311,6 +311,14 @@ impl engine::Database for Db<'_> {
         Ok(counts)
     }
 
+    fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
+        let mut out = BTreeMap::new();
+        for r in rows(&self.0.bin, &self.0.url, &unmodelled_query())? {
+            out.insert(s(&r, "key").to_string(), s(&r, "def").to_string());
+        }
+        Ok(out)
+    }
+
     fn drop_all_but(&self, keep: &str) -> Result<(), String> {
         let kept: BTreeSet<String> = keep
             .split(|c: char| !(c.is_alphanumeric() || c == '_'))
@@ -474,6 +482,141 @@ const NOT_EXTENSION: &str =
 
 /// A table the project defines: ordinary or partitioned, not one partition of another.
 const TABLE: &str = "c.relkind in ('r', 'p') and not c.relispartition";
+
+/// One query listing every catalogue object outside the model as (`key`, `def`). Where a catalogue's columns differ
+/// between versions, the whole row as JSON is the definition: a before/after comparison on one server needs no more.
+fn unmodelled_query() -> String {
+    let not_ext = |oid: &str| NOT_EXTENSION.replace("{oid}", oid);
+    let on_table = "join pg_class c on c.oid = {rel} join pg_namespace n on n.oid = c.relnamespace";
+    let rel = |r: &str| on_table.replace("{rel}", r);
+    let named = "n.nspname || '.' || c.relname";
+    let parts = [
+        format!(
+            "select 'exclusion constraint ' || {named} || '.' || k.conname, pg_get_constraintdef(k.oid) \
+             from pg_constraint k {} where k.contype = 'x' and {USER_SCHEMA}",
+            rel("k.conrelid")
+        ),
+        format!(
+            "select 'domain ' || n.nspname || '.' || t.typname, format_type(t.typbasetype, t.typtypmod) \
+             || case when t.typnotnull then ' not null' else '' end || coalesce(' default ' || t.typdefault, '') \
+             || coalesce((select ' ' || string_agg(pg_get_constraintdef(k.oid), ' ' order by k.conname) \
+             from pg_constraint k where k.contypid = t.oid), '') \
+             from pg_type t join pg_namespace n on n.oid = t.typnamespace \
+             where t.typtype = 'd' and {USER_SCHEMA} and {}",
+            not_ext("t.oid")
+        ),
+        format!(
+            "select 'composite type ' || n.nspname || '.' || t.typname, (select string_agg(a.attname || ' ' \
+             || format_type(a.atttypid, a.atttypmod), ', ' order by a.attnum) from pg_attribute a \
+             where a.attrelid = t.typrelid and a.attnum > 0 and not a.attisdropped) \
+             from pg_type t join pg_namespace n on n.oid = t.typnamespace join pg_class r on r.oid = t.typrelid \
+             where t.typtype = 'c' and r.relkind = 'c' and {USER_SCHEMA} and {}",
+            not_ext("t.oid")
+        ),
+        format!(
+            "select 'range type ' || n.nspname || '.' || t.typname, (row_to_json(g)::jsonb - 'rngtypid')::text \
+             from pg_type t join pg_namespace n on n.oid = t.typnamespace join pg_range g on g.rngtypid = t.oid \
+             where {USER_SCHEMA} and {}",
+            not_ext("t.oid")
+        ),
+        format!(
+            "select case p.prokind when 'a' then 'aggregate ' else 'window function ' end || n.nspname || '.' \
+             || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')', \
+             coalesce((select (row_to_json(g)::jsonb - 'aggfnoid')::text from pg_aggregate g \
+             where g.aggfnoid = p.oid), p.prosrc) \
+             from pg_proc p join pg_namespace n on n.oid = p.pronamespace \
+             where p.prokind in ('a', 'w') and {USER_SCHEMA} and {}",
+            not_ext("p.oid")
+        ),
+        format!(
+            "select 'index on a materialized view ' || {named} || '.' || i.relname, pg_get_indexdef(x.indexrelid) \
+             from pg_index x join pg_class i on i.oid = x.indexrelid {} where c.relkind = 'm' and {USER_SCHEMA}",
+            rel("x.indrelid")
+        ),
+        format!(
+            "select 'index with INCLUDE columns ' || {named} || '.' || i.relname, pg_get_indexdef(x.indexrelid) \
+             from pg_index x join pg_class i on i.oid = x.indexrelid {} \
+             where x.indnkeyatts < x.indnatts and {TABLE} and {USER_SCHEMA}",
+            rel("x.indrelid")
+        ),
+        format!(
+            "select 'trigger on a view ' || {named} || '.' || g.tgname, pg_get_triggerdef(g.oid) \
+             from pg_trigger g {} where c.relkind = 'v' and not g.tgisinternal and {USER_SCHEMA}",
+            rel("g.tgrelid")
+        ),
+        format!(
+            "select 'rule ' || {named} || '.' || w.rulename, pg_get_ruledef(w.oid) \
+             from pg_rewrite w {} where w.rulename <> '_RETURN' and {USER_SCHEMA}",
+            rel("w.ev_class")
+        ),
+        format!(
+            "select 'row-level security ' || {named}, \
+             case when c.relforcerowsecurity then 'enabled, forced' else 'enabled' end \
+             from pg_class c join pg_namespace n on n.oid = c.relnamespace \
+             where (c.relrowsecurity or c.relforcerowsecurity) and {USER_SCHEMA}"
+        ),
+        format!(
+            "select 'policy ' || {named} || '.' || p.polname, p.polcmd::text || ' ' || p.polpermissive::text || ' ' \
+             || array(select r::regrole::text from unnest(p.polroles) r where r <> 0)::text || ' ' \
+             || coalesce(pg_get_expr(p.polqual, p.polrelid), '') || ' ' \
+             || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '') \
+             from pg_policy p {} where {USER_SCHEMA}",
+            rel("p.polrelid")
+        ),
+        format!(
+            "select 'statistics ' || n.nspname || '.' || x.stxname, pg_get_statisticsobjdef(x.oid) \
+             from pg_statistic_ext x join pg_namespace n on n.oid = x.stxnamespace where {USER_SCHEMA}"
+        ),
+        format!(
+            "select 'collation ' || n.nspname || '.' || k.collname, (row_to_json(k)::jsonb - 'oid')::text \
+             from pg_collation k join pg_namespace n on n.oid = k.collnamespace where {USER_SCHEMA} and {}",
+            not_ext("k.oid")
+        ),
+        format!(
+            "select 'event trigger ' || v.evtname, (row_to_json(v)::jsonb - 'oid')::text from pg_event_trigger v \
+             where {}",
+            not_ext("v.oid")
+        ),
+        format!(
+            "select case when c.relispartition then 'partition ' else 'inheritance ' end || {named}, \
+             pns.nspname || '.' || pc.relname || coalesce(' ' || pg_get_expr(c.relpartbound, c.oid), '') \
+             from pg_inherits h {} join pg_class pc on pc.oid = h.inhparent \
+             join pg_namespace pns on pns.oid = pc.relnamespace where c.relkind in ('r', 'p', 'f') and {USER_SCHEMA}",
+            rel("h.inhrelid")
+        ),
+        format!(
+            "select 'foreign table ' || {named}, (select string_agg(a.attname || ' ' \
+             || format_type(a.atttypid, a.atttypmod), ', ' order by a.attnum) from pg_attribute a \
+             where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped) \
+             from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relkind = 'f' and {USER_SCHEMA}"
+        ),
+        // Grants: an old version that loses SELECT breaks as surely as one that loses a column.
+        format!(
+            "select 'grants ' || {named}, coalesce(c.relacl::text, '') || coalesce((select ' ' \
+             || string_agg(a.attname || a.attacl::text, ' ' order by a.attnum) from pg_attribute a \
+             where a.attrelid = c.oid and a.attacl is not null), '') \
+             from pg_class c join pg_namespace n on n.oid = c.relnamespace \
+             where c.relkind in ('r', 'p', 'v', 'm', 'S', 'f') and {USER_SCHEMA} and (c.relacl is not null \
+             or exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attacl is not null))"
+        ),
+        format!(
+            "select 'grants on routine ' || n.nspname || '.' || p.proname || '(' \
+             || pg_get_function_identity_arguments(p.oid) || ')', p.proacl::text \
+             from pg_proc p join pg_namespace n on n.oid = p.pronamespace \
+             where p.proacl is not null and {USER_SCHEMA} and {}",
+            not_ext("p.oid")
+        ),
+        format!(
+            "select 'grants on schema ' || n.nspname, n.nspacl::text from pg_namespace n \
+             where n.nspacl is not null and {USER_SCHEMA}"
+        ),
+    ];
+    let all: Vec<String> = parts
+        .iter()
+        .map(|p| format!("select * from ({p}) u(key, def)"))
+        .collect();
+    all.join(" union all ")
+}
 
 /// Read the schema of the database at `url` into the canonical snapshot.
 pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
@@ -691,7 +834,9 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
         "select n.nspname as ns, p.proname as name, pg_get_function_identity_arguments(p.oid) as args, \
          pg_get_functiondef(p.oid) as def \
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace \
-         where p.prokind in ('f', 'p') and {USER_SCHEMA} and {}",
+         where p.prokind in ('f', 'p') and {USER_SCHEMA} and {} \
+         and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid \
+         and d.deptype = 'i')",
         not_ext("p.oid")
     ))? {
         // Overloads share a name, so the key carries the arguments.

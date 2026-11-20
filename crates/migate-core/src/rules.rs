@@ -222,6 +222,12 @@ pub const RULES: &[Rule] = &[
         axes: "B",
     },
     Rule {
+        id: "MG801",
+        name: "not-checked",
+        description: "The migration changed an object the schema model does not cover (a policy, a domain, a grant, an exclusion constraint and the like), so the schema diff could not judge it. Only the base version's tests did.",
+        axes: "",
+    },
+    Rule {
         id: "MG803",
         name: "head-migration-failed",
         description: "The pull request's migrations fail on a database migrated to the base branch. Deploying fails, and a tool without transactions leaves the changes made so far behind.",

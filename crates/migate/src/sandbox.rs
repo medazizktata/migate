@@ -253,6 +253,7 @@ pub fn run(
         }
     }
     let rows_before = db.row_counts()?;
+    let unmodelled_before = db.unmodelled()?;
     let values_before = db.value_counts()?;
 
     eprintln!("migate: migrating it to HEAD");
@@ -273,6 +274,25 @@ pub fn run(
         ));
     }
     findings.extend(classify(&diff(&before, &after)));
+    let unmodelled_after = db.unmodelled()?;
+    for key in unmodelled_before
+        .keys()
+        .chain(unmodelled_after.keys())
+        .collect::<BTreeSet<_>>()
+    {
+        let what = match (unmodelled_before.get(key), unmodelled_after.get(key)) {
+            (Some(was), Some(now)) if was == now => continue,
+            (None, _) => "added",
+            (_, None) => "removed",
+            _ => "changed",
+        };
+        findings.push(Finding::new(
+            "MG801",
+            Severity::Warning,
+            key.clone(),
+            format!("{what}; migate's schema model does not cover it, so only the base version's tests judged it"),
+        ));
+    }
     let mut lost_rows = BTreeSet::new();
     for (table, now) in db.row_counts()? {
         if let Some(&was) = rows_before.get(&table)
