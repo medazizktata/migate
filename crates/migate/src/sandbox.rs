@@ -146,6 +146,20 @@ pub fn run(
     for var in ["TMPDIR", "TEMP", "TMP"] {
         env.insert(var.into(), scratch.to_string_lossy().into_owned());
     }
+    // Tools that write under HOME but honour a variable write into the run instead (Wrangler's debug logs and dev
+    // registry), and a sandbox sends no telemetry. A value the configuration sets wins.
+    let run_dir = tmp.0.to_string_lossy().into_owned();
+    for (var, value) in [
+        ("WRANGLER_LOG_PATH", format!("{run_dir}/wrangler/logs")),
+        (
+            "WRANGLER_REGISTRY_PATH",
+            format!("{run_dir}/wrangler/registry"),
+        ),
+        ("WRANGLER_SEND_METRICS", "false".into()),
+    ] {
+        env.entry(var.into()).or_insert(value);
+    }
+    let kept = Kept::new(cfg.keep_output.as_deref().map(|p| root.join(p)))?;
     let mut migrate_env = env.clone();
     migrate_env.extend(
         migrator
@@ -209,7 +223,7 @@ pub fn run(
 
     if let Some(setup) = &cfg.setup {
         for (name, d) in [("base", &base_dir), ("head", &head_dir)] {
-            let out = sh(&vars(setup), d, &env)?;
+            let out = kept.save(&format!("{name}-setup"), sh(&vars(setup), d, &env)?)?;
             if !out.status.success() {
                 return Err(format!(
                     "the setup command failed in the {name} checkout:\n{}",
@@ -220,7 +234,7 @@ pub fn run(
     }
 
     eprintln!("migate: migrating a throwaway database to {base}");
-    let mut out = sh(&migrate, &base_dir, &migrate_env)?;
+    let mut out = kept.save("base-migrate", sh(&migrate, &base_dir, &migrate_env)?)?;
     if !out.status.success() {
         // One retry, for set-up only: a dropped connection should not cost the verdict. The head migrations get none,
         // since their failure is a finding (MG803).
@@ -228,7 +242,7 @@ pub fn run(
             "migate: the migrate command failed at {base}; running it once again:\n{}",
             tail(&out)
         );
-        out = sh(&migrate, &base_dir, &migrate_env)?;
+        out = kept.save("base-migrate-again", sh(&migrate, &base_dir, &migrate_env)?)?;
     }
     if !out.status.success() {
         // Its own output says why: a migration failing on an empty database, or a command that cannot run here (a tool
@@ -263,7 +277,7 @@ pub fn run(
         |why: String| format!("MG813 old-version-run-invalid: {why}. Nothing was checked");
 
     if let Some(seed) = &cfg.seed {
-        let out = sh(&vars(seed), &base_dir, &env)?;
+        let out = kept.save("seed", sh(&vars(seed), &base_dir, &env)?)?;
         if !out.status.success() {
             return Err(format!("the seed command failed:\n{}", tail(&out)));
         }
@@ -271,14 +285,14 @@ pub fn run(
     // Calibration, before the check: the tests must pass on their own version's database.
     if let Some(test) = &cfg.test {
         eprintln!("migate: running the base version's tests on its own database first");
-        let mut out = sh(&vars(test), &base_dir, &env)?;
+        let mut out = kept.save("base-test", sh(&vars(test), &base_dir, &env)?)?;
         if !out.status.success() {
             // One retry: a one-off flake (a busy database while a runtime starts) should not cost the verdict.
             eprintln!(
                 "migate: the base version's tests failed on their own database; running them once again:\n{}",
                 tail(&out)
             );
-            out = sh(&vars(test), &base_dir, &env)?;
+            out = kept.save("base-test-again", sh(&vars(test), &base_dir, &env)?)?;
         }
         if !out.status.success() {
             return Err(invalid(format!(
@@ -293,7 +307,7 @@ pub fn run(
     let values_before = db.value_counts()?;
 
     eprintln!("migate: migrating it to HEAD");
-    let out = sh(&migrate, &head_dir, &migrate_env)?;
+    let out = kept.save("head-migrate", sh(&migrate, &head_dir, &migrate_env)?)?;
     let after = db.snapshot()?;
     // Read now: migate's own calibration writes to the file later, which would record migate's version instead.
     let newer_writer = db.newer_writer();
@@ -387,7 +401,7 @@ pub fn run(
         (Some(test), true) => {
             let recorded = db.count_rows(history)?;
             eprintln!("migate: running the base version's tests against it");
-            let out = sh(&vars(test), &base_dir, &env)?;
+            let out = kept.save("head-test", sh(&vars(test), &base_dir, &env)?)?;
             if !out.status.success() {
                 findings.push(Finding::new(
                     "MG810",
@@ -411,7 +425,11 @@ pub fn run(
                 }
                 db.drop_all_but(history)?;
                 eprintln!("migate: checking the tests notice a database with its tables dropped");
-                if sh(&vars(test), &base_dir, &env)?.status.success() {
+                if kept
+                    .save("canary-test", sh(&vars(test), &base_dir, &env)?)?
+                    .status
+                    .success()
+                {
                     return Err(invalid(
                     "the base version's tests still pass with every table but the migration history dropped, so they \
                      never used the migrated database (a stub command, or a framework that makes its own test \
@@ -492,12 +510,15 @@ fn place(f: Finding, added: &[(String, String)]) -> Finding {
             ok(line[..i].chars().next_back()) && ok(line[i + name.len()..].chars().next())
         })
     };
-    for (path, text) in added.iter().rev() {
+    // The first migration of the change that names the object: the one that adds or alters it, before any later one
+    // that only uses it.
+    for (path, text) in added {
         if let Some(n) = text.lines().position(word) {
             return f.at(path.clone(), u32::try_from(n + 1).unwrap_or(1));
         }
     }
-    f.at(last.clone(), 1)
+    // No migration of the change names it: the file is a guess, the line unknown (0, written without a line).
+    f.at(last.clone(), 0)
 }
 
 // shortcut: commands run through `sh` with no time limit; Windows and a timeout when someone needs them.
@@ -596,6 +617,37 @@ fn held_rows(rows: &BTreeMap<String, u64>) -> String {
     )
 }
 
+/// Where each command's full output goes when `keep_output` is set: one file per step, numbered in the order they ran.
+struct Kept {
+    dir: Option<PathBuf>,
+    next: std::cell::Cell<u32>,
+}
+
+impl Kept {
+    fn new(dir: Option<PathBuf>) -> Result<Kept, String> {
+        if let Some(d) = &dir {
+            std::fs::create_dir_all(d).map_err(|e| format!("keep_output {}: {e}", d.display()))?;
+        }
+        Ok(Kept {
+            dir,
+            next: std::cell::Cell::new(1),
+        })
+    }
+
+    fn save(&self, step: &str, out: Output) -> Result<Output, String> {
+        if let Some(d) = &self.dir {
+            let n = self.next.replace(self.next.get() + 1);
+            let path = d.join(format!("{n:02}-{step}.log"));
+            std::fs::write(
+                &path,
+                [out.stdout.as_slice(), out.stderr.as_slice()].concat(),
+            )
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+        Ok(out)
+    }
+}
+
 /// What a failed command said, for the report: exit status, then [`excerpt`] of its output.
 fn tail(out: &Output) -> String {
     let text = format!(
@@ -618,7 +670,20 @@ fn excerpt(text: &str) -> String {
     let lines: Vec<&str> = plain.lines().filter(|l| !l.trim().is_empty()).collect();
     let failing = |l: &&str| {
         // A passing test named after a failure case ("✓ a failure at item 9 ...") is not a failure.
-        if l.trim_start().starts_with(['\u{2713}', '\u{2714}']) {
+        // A passing or skipped test named after a failure case ("\u{2713} a failure at item 9", "\u{2193} rejects ... with
+        // an error") is not a failure, nor is a package manager's line saying the command it wrapped failed.
+        if l.trim_start()
+            .starts_with(['\u{2713}', '\u{2714}', '\u{2193}', '\u{25cb}'])
+            || [
+                "ELIFECYCLE",
+                "ERR_PNPM_",
+                "npm ERR!",
+                "Command failed with exit code",
+                "recursive run\" failed",
+            ]
+            .iter()
+            .any(|w| l.contains(w))
+        {
             return false;
         }
         let l = l.to_ascii_lowercase();
@@ -718,6 +783,31 @@ mod tests {
             excerpt(&out).contains("does not exist"),
             "{}",
             excerpt(&out)
+        );
+    }
+
+    #[test]
+    fn skipped_tests_and_package_manager_lines_do_not_crowd_out_the_failure() {
+        // The shape of a real vitest run under pnpm: skipped tests named after errors, the failure, pnpm's wrapper.
+        let mut out = String::new();
+        for i in 0..12 {
+            out.push_str(&format!(
+                "     \u{2193} rejects case {i} with a contract error\n"
+            ));
+        }
+        out.push_str(" FAIL  tests/int/catalog.int.spec.ts > brands > creates a brand\n");
+        out.push_str("Error: slug required\n");
+        out.push_str(&"filler\n".repeat(6));
+        out.push_str("[ELIFECYCLE] Command failed with exit code 1.\nError: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL\n");
+        out.push_str(&"tail\n".repeat(5));
+        let got = excerpt(&out);
+        assert!(
+            got.contains("FAIL  tests/int/catalog.int.spec.ts") && got.contains("slug required"),
+            "{got}"
+        );
+        assert!(
+            !got.contains('\u{2193}') && !got.contains("ERR_PNPM"),
+            "{got}"
         );
     }
 
@@ -940,6 +1030,8 @@ impl TempDir {
         let mut l = live();
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         l.dirs.push(dir.clone());
+        // macOS Spotlight would index the checkouts' dependency folders it is about to remove.
+        let _ = std::fs::write(dir.join(".metadata_never_index"), "");
         Ok(TempDir(dir))
     }
 }

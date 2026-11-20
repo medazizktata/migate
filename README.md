@@ -4,7 +4,8 @@ A free, offline release gate for database migrations that works with **any migra
 primary check runs the version of your app that is still live against the database after your new migrations, so a
 migration that would break the running app is stopped before it ships. It also stops a migration from changing after
 production ran it, from running out of order or being silently skipped, and from disagreeing with production's own
-history.
+history. Offline means migate itself needs no network and sends nothing anywhere; the commands you give it run as
+they would on your machine, so an install in `setup` still downloads what your lockfile names.
 
 Status: early, not released. Works today on SQLite projects (Cloudflare D1's local mode included) and on PostgreSQL
 projects, with a throwaway local server. `docs/product.md`

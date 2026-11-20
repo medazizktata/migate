@@ -16,6 +16,7 @@
 //! seed = "pnpm run seed"                       # optional: rows for the data-loss check
 //! test = "pnpm test"                           # the base version's tests, run against the migrated database
 //! target_version = "3.37.2"                     # optional: production's engine version (SQLite 3.37.2, PostgreSQL 15)
+//! keep_output = "migate-output"                 # optional: every command's full output, one file per step
 //! ```
 
 use std::collections::BTreeMap;
@@ -83,6 +84,9 @@ pub struct Sandbox {
     /// The engine version production runs (`3.37.2` for SQLite, `15` for PostgreSQL), when it differs from the
     /// sandbox's: syntax production lacks is an error (MG701), and PostgreSQL runs on that major when installed.
     pub target_version: Option<String>,
+    /// A folder (relative to the repository root) to keep every command's full output in, one file per step, since
+    /// the run's own folder is removed when it ends. For CI, upload it as an artifact.
+    pub keep_output: Option<String>,
 }
 
 /// `explicit` is `--config`; without it, `<root>/migate.toml` is read if present.

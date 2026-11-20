@@ -65,7 +65,10 @@ fn text(findings: &[Finding], cx: &Context) -> String {
     for f in sorted(findings) {
         let place =
             f.at.as_ref()
-                .map_or(String::new(), |(file, line)| format!(" ({file}:{line})"));
+                .map_or(String::new(), |(file, line)| match line {
+                    0 => format!(" ({file})"),
+                    _ => format!(" ({file}:{line})"),
+                });
         // The place goes on the finding's first line, before a multi-line message's detail.
         let (first, rest) = f.message.split_once('\n').unwrap_or((&f.message, ""));
         let rest = if rest.is_empty() {
@@ -118,10 +121,18 @@ fn json_report(findings: &[Finding], cx: &Context) -> Value {
             "severity": level(f.severity),
             "object": f.object,
             "file": file_of(f, cx).0,
-            "line": file_of(f, cx).1,
+            "line": Some(file_of(f, cx).1).filter(|l| *l > 0),
             "message": f.message,
         })).collect::<Vec<_>>(),
     })
+}
+
+/// A SARIF physical location; a line of 0 is unknown, so there is no region.
+fn physical((file, line): (&str, u32)) -> serde_json::Value {
+    match line {
+        0 => json!({ "artifactLocation": { "uri": file } }),
+        _ => json!({ "artifactLocation": { "uri": file }, "region": { "startLine": line } }),
+    }
 }
 
 /// Where a finding points: its own place, else the migration it names, else the ledger.
@@ -187,12 +198,7 @@ fn sarif(findings: &[Finding], cx: &Context) -> Value {
                 "ruleIndex": used.iter().position(|id| *id == f.rule).unwrap_or(0),
                 "level": level(f.severity),
                 "message": { "text": format!("{}: {}", f.object, f.message) },
-                "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": { "uri": file_of(f, cx).0 },
-                        "region": { "startLine": file_of(f, cx).1 }
-                    }
-                }],
+                "locations": [{ "physicalLocation": physical(file_of(f, cx)) }],
                 // Stable across runs and line moves, so code scanning tracks one alert per rule and object.
                 "partialFingerprints": { "migate/v1": format!("{}:{}", f.rule, f.object) },
             })

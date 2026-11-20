@@ -2439,3 +2439,127 @@ fn setup_writes_the_gitignored_config_a_suite_needs() {
     let (code, out, err) = build(&with_setup);
     assert_eq!(code, 0, "{out}{err}");
 }
+
+#[test]
+fn project_tools_keep_their_logs_and_registry_inside_the_run() {
+    // Wrangler writes its debug logs and dev registry under HOME unless told otherwise; telemetry is off in a sandbox.
+    let seen = std::env::temp_dir().join(format!("migate-env-seen-{}", std::process::id()));
+    let probe = format!(
+        "migrate = 'printf \"%s|%s|%s|%s\" \"$WRANGLER_LOG_PATH\" \"$WRANGLER_REGISTRY_PATH\" \"$WRANGLER_SEND_METRICS\" \"$(ls -a {{dir}}/.. | grep -c metadata_never_index)\" > {}; python3 apply.py'",
+        seen.display()
+    );
+    let config = SANDBOX_TOML.replace("migrate = \"python3 apply.py\"", &probe);
+    let r = sandbox_repo(&config, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    let got = fs::read_to_string(&seen).unwrap();
+    let parts: Vec<&str> = got.split('|').collect();
+    assert!(
+        parts[0].contains("migate-run-") && parts[1].contains("migate-run-"),
+        "{got}"
+    );
+    assert_eq!((parts[2], parts[3]), ("false", "1"), "{got}");
+}
+
+#[test]
+fn the_full_output_of_every_command_can_be_kept() {
+    let kept = std::env::temp_dir().join(format!("migate-kept-{}", std::process::id()));
+    let config = SANDBOX_TOML.replace(
+        "[sandbox]\n",
+        &format!("[sandbox]\nkeep_output = \"{}\"\n", kept.display()),
+    );
+    let r = sandbox_repo(&config, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    let mut names: Vec<String> = fs::read_dir(&kept)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert!(
+        names.iter().any(|n| n.ends_with("base-migrate.log"))
+            && names.iter().any(|n| n.ends_with("head-test.log")),
+        "{names:?}"
+    );
+    let head_test = names.iter().find(|n| n.ends_with("head-test.log")).unwrap();
+    assert!(
+        fs::read_to_string(kept.join(head_test))
+            .unwrap()
+            .contains("a@b.c"),
+        "the old app's own output is kept whole"
+    );
+}
+
+#[test]
+fn a_column_is_placed_in_the_migration_that_adds_it() {
+    // Two new migrations: the first adds the column, the second only mentions it.
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    r.write(
+        "migrations/0003_rules.sql",
+        "CREATE INDEX users_nickname ON users (nickname);",
+    );
+    r.commit("rules");
+    let (_, out, err) = sandbox_check(&r, &[]);
+    let line = out
+        .lines()
+        .find(|l| l.contains("main.users.nickname "))
+        .unwrap_or_else(|| panic!("{out}{err}"));
+    assert!(line.contains("(migrations/0002_change.sql:1)"), "{line}");
+}
+
+#[test]
+fn a_finding_the_migrations_never_name_says_its_line_is_unknown() {
+    // A parent rebuild nulls the children's reference: the migration never names posts.user_id, so no line is it.
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users ON DELETE SET NULL);";
+    let rebuild = "CREATE TABLE users_new (id INTEGER PRIMARY KEY, email TEXT, legacy TEXT);
+INSERT INTO users_new SELECT id, email, legacy FROM users;
+DROP TABLE users;
+ALTER TABLE users_new RENAME TO users;";
+    let seeded = SANDBOX_TOML.replace("test = ", "seed = \"python3 seed.py\"\ntest = ");
+    let r = sandbox_repo_full(&seeded, OLD_APP, first, rebuild);
+    let (_, out, err) = sandbox_check(&r, &[]);
+    let line = out
+        .lines()
+        .find(|l| l.contains("main.posts.user_id"))
+        .unwrap_or_else(|| panic!("{out}{err}"));
+    assert!(line.contains("(migrations/0002_change.sql)"), "{line}");
+    let out = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .args(["check", "--format", "json"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let f = v["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["object"] == "main.posts.user_id")
+        .unwrap()
+        .clone();
+    assert!(f["line"].is_null(), "{f}");
+    let out = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .args(["check", "--format", "sarif"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let res = v["runs"][0]["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| {
+            r["message"]["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("main.posts.user_id")
+        })
+        .unwrap()
+        .clone();
+    assert!(
+        res["locations"][0]["physicalLocation"]
+            .get("region")
+            .is_none(),
+        "{res}"
+    );
+}
