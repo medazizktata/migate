@@ -48,6 +48,11 @@ pub struct Digests {
     pub code_sha256: String,
 }
 
+/// SHA-256 of the bytes exactly as they are, the way a project's own tooling records a migration.
+pub fn raw_sha256(bytes: &[u8]) -> String {
+    hex_sha256(bytes)
+}
+
 pub fn digests(bytes: &[u8], lang: Lang) -> Digests {
     let normalised = normalise(bytes);
     let sha256 = hex_sha256(&normalised);

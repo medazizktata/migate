@@ -31,6 +31,9 @@ use serde::Deserialize;
 pub struct Config {
     pub migrator: Option<String>,
     pub ledger: Option<String>,
+    /// How the ledger file stores entries: "migate" (the default) or "sha256", a project's own `{name: sha256 of the
+    /// file}` record read as it is (any edit is then MG001: there is no code-only hash).
+    pub ledger_format: Option<String>,
     pub base: Option<String>,
     /// Overrides the migrator's out-of-order policy (block, warn or allow) when the project's own runner differs.
     pub out_of_order: Option<String>,
@@ -87,6 +90,10 @@ pub struct Sandbox {
     /// A folder (relative to the repository root) to keep every command's full output in, one file per step, since
     /// the run's own folder is removed when it ends. For CI, upload it as an artifact.
     pub keep_output: Option<String>,
+    /// A project's own contract marker word (`CONTRACT` for `// CONTRACT: <why>`). A migration of the change holding
+    /// such a line, with a reason, is an intended contract step: its findings that point at a known line are accepted,
+    /// as a `migate: contract` marker would accept each. The rules no marker can accept stay.
+    pub contract_marker: Option<String>,
 }
 
 /// `explicit` is `--config`; without it, `<root>/migate.toml` is read if present.

@@ -74,6 +74,20 @@ reason is the reviewer's answer to the one question that matters:
 
 The marker is read in any comment style, so a TypeScript migration (Payload, Drizzle) uses `//`.
 
+A project that already keeps its own record of deployed migrations, as `{name: sha256 of the file}`, can have migate
+read and extend that record instead of keeping a second ledger. That format holds no code-only hash, so any edit to a
+recorded migration is MG001, a comment-only one included. A project that already marks its contract steps its own way
+can have migate take that marker too: a migration holding `// CONTRACT: <why>` accepts its findings at known lines, as
+one `migate: contract` marker per finding would. A failing old-version test, a failed run and the migration record are
+never accepted.
+
+```toml
+ledger = "db/deployed.json"
+ledger_format = "sha256"
+[sandbox]
+contract_marker = "CONTRACT"
+```
+
 For Cloudflare D1, migate runs `wrangler d1 migrations apply --local` into its own folder and finds the database
 there; it only needs the database's name from your wrangler configuration:
 

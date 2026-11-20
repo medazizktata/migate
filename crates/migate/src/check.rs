@@ -60,6 +60,7 @@ struct Settings {
     migrator: Migrator,
     root: PathBuf,
     ledger: String,
+    ledger_format: ledger_file::Format,
     base: String,
     sandbox: Option<config::Sandbox>,
 }
@@ -94,6 +95,7 @@ fn settings(c: &Common, base_flag: Option<&String>) -> Result<Settings, String> 
             .clone()
             .or(file.ledger)
             .unwrap_or_else(|| "migate-ledger.json".into()),
+        ledger_format: ledger_file::Format::from_config(file.ledger_format.as_deref())?,
         base: base_flag
             .cloned()
             .or(file.base)
@@ -175,9 +177,11 @@ struct Checked {
 fn run_check(s: &Settings) -> Result<Checked, String> {
     let project = project::read(&s.root, &s.migrator)?;
     found_any(&project, s)?;
-    let head = ledger_file::read(&s.root.join(&s.ledger))?;
+    let head = ledger_file::read(&s.root.join(&s.ledger), s.ledger_format)?;
     let base = match file_at_base(&s.root, &s.base, &s.ledger)? {
-        AtBase::Found(text) => ledger_file::parse(&text, &format!("{}:{}", s.base, s.ledger))?,
+        AtBase::Found(text) => {
+            ledger_file::parse(&text, &format!("{}:{}", s.base, s.ledger), s.ledger_format)?
+        }
         AtBase::Absent => Ledger::new(),
     };
 
@@ -271,7 +275,7 @@ pub fn record(args: &RecordArgs) -> Outcome {
 fn run_record(args: &RecordArgs, s: &Settings) -> Result<Outcome, String> {
     let project = project::read(&s.root, &s.migrator)?;
     let path = s.root.join(&s.ledger);
-    let mut ledger = ledger_file::read(&path)?;
+    let mut ledger = ledger_file::read(&path, s.ledger_format)?;
     if args.all {
         found_any(&project, s)?;
     }
@@ -285,7 +289,10 @@ fn run_record(args: &RecordArgs, s: &Settings) -> Result<Outcome, String> {
         let Some(file) = project.files.iter().find(|f| &f.id == id) else {
             return Err(format!("no migration file for `{id}`"));
         };
-        let entry = file.entry();
+        let entry = match s.ledger_format {
+            ledger_file::Format::Sha256 => file.raw_entry(),
+            ledger_file::Format::Migate => file.entry(),
+        };
         match ledger.get(id) {
             Some(existing) if *existing == entry => println!("already recorded: {id}"),
             Some(_) => {
@@ -303,6 +310,6 @@ fn run_record(args: &RecordArgs, s: &Settings) -> Result<Outcome, String> {
     if refused {
         return Ok(Outcome::Errors);
     }
-    ledger_file::write(&path, &ledger)?;
+    ledger_file::write(&path, &ledger, s.ledger_format)?;
     Ok(Outcome::Clean)
 }

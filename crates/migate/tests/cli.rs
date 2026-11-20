@@ -344,7 +344,10 @@ fn an_old_format_ledger_is_exit_3_with_a_hint() {
     );
     let (code, _, err) = r.check("rails");
     assert_eq!(code, 3);
-    assert!(err.contains("older {name: hash} format"), "{err}");
+    assert!(
+        err.contains("older {name: hash} format") && err.contains("ledger_format = \"sha256\""),
+        "{err}"
+    );
 }
 
 #[test]
@@ -2562,4 +2565,131 @@ ALTER TABLE users_new RENAME TO users;";
             .is_none(),
         "{res}"
     );
+}
+
+/// SHA-256 of `bytes` in hex, as a project's own tooling would compute it (Python's hashlib, present wherever CI is).
+fn raw_sha256(bytes: &[u8]) -> String {
+    let path =
+        std::env::temp_dir().join(format!("migate-sha-{}-{}", std::process::id(), bytes.len()));
+    fs::write(&path, bytes).unwrap();
+    let out = Command::new("python3")
+        .args([
+            "-I",
+            "-c",
+            "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+const OWN_LEDGER_TOML: &str = "migrator = \"rails\"\nbase = \"main\"\nledger = \"deployed.json\"\nledger_format = \"sha256\"\n";
+
+#[test]
+fn a_projects_own_sha256_ledger_is_read_with_raw_bytes() {
+    // CRLF line endings: the raw bytes' hash is what the project's tooling records, and it differs from a normalised one.
+    let source = "class CreateOrders < ActiveRecord::Migration[8.1]\r\n  def change\r\n    create_table :orders\r\n  end\r\nend\r\n";
+    let r = Repo::new();
+    r.write("migate.toml", OWN_LEDGER_TOML);
+    r.write(ORDERS, source);
+    // A second, later migration that production has not run, so moving the first away leaves a project to check.
+    r.write(
+        TOTAL,
+        "class AddTotal < ActiveRecord::Migration[8.1]\nend\n",
+    );
+    r.write(
+        "deployed.json",
+        &format!(
+            "{{\"20260101000000_create_orders\": \"{}\"}}\n",
+            raw_sha256(source.as_bytes())
+        ),
+    );
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    let run = || {
+        let out = r.migate(&["check"]);
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let (code, out, err) = run();
+    assert_eq!(code, 0, "unchanged: {out}{err}");
+    r.write(ORDERS, &source.replace(":orders", ":purchases"));
+    let (code, out, _) = run();
+    assert_eq!(code, 2, "{out}");
+    assert!(
+        out.contains("error   MG001")
+            && out.contains("the record holds the whole file's hash only"),
+        "{out}"
+    );
+    // Moved out of the migrations folder: gone, as far as the migrator is concerned.
+    r.git(&["mv", "-f", ORDERS, "elsewhere.rb"]);
+    let (code, out, err) = run();
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("error   MG002"), "{out}");
+}
+
+#[test]
+fn recording_into_a_sha256_ledger_keeps_its_format() {
+    let source = "class CreateOrders < ActiveRecord::Migration[8.1]\r\nend\r\n";
+    let r = Repo::new();
+    r.write("migate.toml", OWN_LEDGER_TOML);
+    r.write(ORDERS, source);
+    r.write("deployed.json", "{}\n");
+    let out = r.migate(&["ledger", "record", "20260101000000_create_orders"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&r.read("deployed.json")).unwrap();
+    assert_eq!(
+        v["20260101000000_create_orders"],
+        serde_json::json!(raw_sha256(source.as_bytes())),
+        "{v}"
+    );
+}
+
+const DROP_LEGACY: &str = "ALTER TABLE users DROP COLUMN legacy;";
+
+#[test]
+fn a_projects_own_contract_marker_accepts_its_file() {
+    let config = SANDBOX_TOML.replace("[sandbox]\n", "[sandbox]\ncontract_marker = \"CONTRACT\"\n");
+    let marked = sandbox_repo_with(
+        &config,
+        OLD_APP_WITHOUT_LEGACY,
+        &format!("-- CONTRACT: the app stopped reading legacy in v42\n{DROP_LEGACY}"),
+    );
+    let (code, out, err) = sandbox_check(&marked, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("note    MG201") && out.contains("the app stopped reading legacy in v42"),
+        "{out}"
+    );
+    let unmarked = sandbox_repo_with(&config, OLD_APP_WITHOUT_LEGACY, DROP_LEGACY);
+    let (code, out, _) = sandbox_check(&unmarked, &[]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("error   MG201"), "{out}");
+}
+
+#[test]
+fn a_projects_marker_does_not_accept_a_finding_whose_line_is_unknown() {
+    // The rebuild never names posts.user_id: its place in the marked file is a guess, so the file's marker cannot cover it.
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users ON DELETE SET NULL);";
+    let rebuild = "-- CONTRACT: rebuilding users to drop a constraint
+CREATE TABLE users_new (id INTEGER PRIMARY KEY, email TEXT, legacy TEXT);
+INSERT INTO users_new SELECT id, email, legacy FROM users;
+DROP TABLE users;
+ALTER TABLE users_new RENAME TO users;";
+    let config = SANDBOX_TOML
+        .replace("[sandbox]\n", "[sandbox]\ncontract_marker = \"CONTRACT\"\n")
+        .replace("test = ", "seed = \"python3 seed.py\"\ntest = ");
+    let r = sandbox_repo_full(&config, OLD_APP, first, rebuild);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("error   MG106  main.posts.user_id"), "{out}");
 }

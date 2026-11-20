@@ -216,6 +216,10 @@ pub fn run(
         markers.extend(m);
         bad_markers.extend(bad);
     }
+    let marked_files = cfg
+        .contract_marker
+        .as_deref()
+        .map_or_else(Vec::new, |word| project_markers(&added, word));
 
     if let Some(rel) = &cfg.shared {
         share(rel, &dir.join("shared"), &[&base_dir, &head_dir])?;
@@ -448,6 +452,22 @@ pub fn run(
         (Some(_), false) => {}
     }
     let findings: Vec<Finding> = findings.into_iter().map(|f| place(f, &added)).collect();
+    // A project's own marker accepts its file's findings one by one, as `migate: contract` markers would; only those
+    // at a known line (a guessed place could be another file's finding), never the rules no marker can accept.
+    for (path, at, reason) in &marked_files {
+        for f in &findings {
+            if matches!(&f.at, Some((p, line)) if p == path && *line > 0)
+                && !contract::FINAL.contains(&f.rule)
+            {
+                markers.push(contract::Marker {
+                    at: at.clone(),
+                    rule: f.rule.to_string(),
+                    object: f.object.clone(),
+                    reason: reason.clone(),
+                });
+            }
+        }
+    }
     let mut findings = contract::apply(findings, &markers);
     findings.extend(bad_markers);
     let engine = format!(
@@ -646,6 +666,31 @@ impl Kept {
         }
         Ok(out)
     }
+}
+
+/// The migrations of the change that a project's own marker (`// WORD: <reason>`, or `--` or `#`) marks as an
+/// intended contract step: (path, `path:line` of the marker, reason). A marker without a reason marks nothing.
+fn project_markers(added: &[(String, String)], word: &str) -> Vec<(String, String, String)> {
+    added
+        .iter()
+        .filter_map(|(path, text)| {
+            text.lines().enumerate().find_map(|(n, line)| {
+                let rest = line.trim_start();
+                let rest = ["//", "--", "#"]
+                    .iter()
+                    .find_map(|c| rest.strip_prefix(c))?
+                    .trim_start();
+                let reason = rest.strip_prefix(word)?.strip_prefix(':')?.trim();
+                (!reason.is_empty()).then(|| {
+                    (
+                        path.clone(),
+                        format!("{path}:{}", n + 1),
+                        reason.to_string(),
+                    )
+                })
+            })
+        })
+        .collect()
 }
 
 /// What a failed command said, for the report: exit status, then [`excerpt`] of its output.

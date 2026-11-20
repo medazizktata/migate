@@ -11,9 +11,10 @@
 use std::collections::BTreeMap;
 
 use crate::finding::{Finding, Severity};
-use crate::hash::{Lang, digests};
+use crate::hash::{Lang, digests, raw_sha256};
 
-/// One applied migration as production ran it.
+/// One applied migration as production ran it. An empty `code_sha256` means only the whole file's raw hash is known
+/// (a project's own `{name: sha256}` record): any edit then counts as code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub sha256: String,
@@ -33,6 +34,14 @@ pub struct MigrationFile {
 }
 
 impl MigrationFile {
+    /// The entry a project's own record would hold: the raw bytes' hash only.
+    pub fn raw_entry(&self) -> Entry {
+        Entry {
+            sha256: raw_sha256(&self.bytes),
+            code_sha256: String::new(),
+        }
+    }
+
     /// The entry this file would get if production ran it now.
     pub fn entry(&self) -> Entry {
         let d = digests(&self.bytes, Lang::from_path(&self.path));
@@ -98,8 +107,23 @@ pub fn check(
             ));
             continue;
         };
-        let actual = file.entry();
+        let whole_file_only = expected.code_sha256.is_empty();
+        let actual = if whole_file_only {
+            file.raw_entry()
+        } else {
+            file.entry()
+        };
         if actual.sha256 == expected.sha256 {
+            continue;
+        }
+        if whole_file_only {
+            findings.push(Finding::new(
+                "MG001",
+                Severity::Error,
+                id,
+                "edited after production ran it: production keeps the old version, so add a new migration instead (the \
+                 record holds the whole file's hash only, so a comment-only edit counts too)",
+            ));
             continue;
         }
         if actual.code_sha256 == expected.code_sha256 {
