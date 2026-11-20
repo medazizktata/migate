@@ -8,10 +8,10 @@ minutes a month. CI is arranged so that pushing costs almost nothing and the ful
 | Trigger | Workflow | Runs | Runner minutes (measured 2026-11-20) |
 |---|---|---|---|
 | every push, every pull request | `guard.yml` | nothing sensitive in the history | about 1 |
-| a tag `v*` | `release.yml` | the full suite (`ci.yml`), a Linux binary, the GitHub release | about 13 for the suite, plus the build |
+| a tag `v*` | `release.yml` | the full suite (`ci.yml`), a Linux binary, the GitHub release | about 13, build included |
 | by hand (Actions tab, or `gh workflow run`) | `ci.yml` | the full suite: all checks, minimum Rust, PostgreSQL 15-18 | about 13 |
-| by hand | `release.yml` | a dry run: the suite and the build, no release | about 13, plus the build |
-| the 1st of each month, or by hand | `mutants.yml` | mutation testing of `migate-core` | not yet measured on GitHub |
+| by hand | `release.yml` | a dry run: the suite and the build, no release | about 13 |
+| the 1st of each month, or by hand | `mutants.yml` | mutation testing of `migate-core` | about 19 |
 
 Every commit already runs the checks locally (`.githooks/pre-commit`), and every push runs the sensitive-content
 check locally (`.githooks/pre-push`), so CI between releases adds Linux and the PostgreSQL versions, not first
