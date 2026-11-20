@@ -160,7 +160,10 @@ impl Drop for Server {
     fn drop(&mut self) {
         // SIGINT is Postgres's fast shutdown; SIGKILL if it has not gone after ten seconds.
         let pid = self.child.id().to_string();
-        let _ = Command::new("kill").args(["-INT", &pid]).status();
+        let _ = Command::new("kill")
+            .stderr(Stdio::null())
+            .args(["-INT", &pid])
+            .status();
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             if matches!(self.child.try_wait(), Ok(Some(_))) {
@@ -195,7 +198,10 @@ pub fn stop_left_server(dir: &Path) {
     if !is_that_server {
         return;
     }
-    let _ = Command::new("kill").args(["-INT", &pid]).status();
+    let _ = Command::new("kill")
+        .stderr(Stdio::null())
+        .args(["-INT", &pid])
+        .status();
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         let alive = Command::new("kill")
@@ -207,7 +213,10 @@ pub fn stop_left_server(dir: &Path) {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    let _ = Command::new("kill").args(["-KILL", &pid]).status();
+    let _ = Command::new("kill")
+        .stderr(Stdio::null())
+        .args(["-KILL", &pid])
+        .status();
 }
 
 impl engine::Sandbox for Server {
@@ -285,10 +294,11 @@ impl engine::Database for Db<'_> {
             .map(|((ns, tbl), cols)| {
                 let fields: Vec<String> = cols
                     .iter()
-                    .map(|c| format!("{}, count({})", literal(c), quoted(c)))
+                    .map(|c| format!("count({0}) as {0}", quoted(c)))
                     .collect();
                 format!(
-                    "select {} as ns, {} as tbl, json_build_object({}) as counts from {}.{}",
+                    // A row, not json_build_object: a function takes at most 100 arguments, two per column.
+                    "select {} as ns, {} as tbl, (select row_to_json(x) from (select {} from {}.{}) x) as counts",
                     literal(ns),
                     literal(tbl),
                     fields.join(", "),
