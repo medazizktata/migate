@@ -1436,3 +1436,55 @@ done
     assert_eq!(code, 2, "{out}{err}");
     assert!(out.contains("MG201") && out.contains("MG810"), "{out}");
 }
+
+/// Base 0001 and 0003; the change adds 0002, which sorts before the last one: MG004.
+fn late_migration_repo(config: &str) -> Repo {
+    let r = Repo::new();
+    r.write("migate.toml", config);
+    r.write("apply.py", APPLY);
+    r.write("old_app.py", OLD_APP);
+    r.write("seed.py", SEED);
+    r.write("migrations/0001_init.sql", INIT);
+    r.write("migrations/0003_c.sql", "CREATE TABLE c (id INTEGER);");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write("migrations/0002_b.sql", "CREATE TABLE b (id INTEGER);");
+    r.commit("late");
+    r
+}
+
+#[test]
+fn findings_the_sandbox_did_not_need_survive_when_it_cannot_check() {
+    // The sandbox proves nothing (a stub test command: MG813), but the late migration is known without it.
+    let stub = SANDBOX_TOML.replace("python3 old_app.py", "true");
+    let blocking = stub.replace(
+        "base = \"main\"",
+        "base = \"main\"\nout_of_order = \"block\"",
+    );
+    let r = late_migration_repo(&blocking);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "an error was found, so it is exit 2: {out}{err}");
+    assert!(
+        out.contains("error   MG004") && out.contains("0002_b.sql"),
+        "{out}"
+    );
+    assert!(
+        err.contains("MG813"),
+        "the sandbox part still says why it could not check: {err}"
+    );
+
+    // Only a warning without the sandbox: exit 3, since the part that could find errors did not run.
+    let r = late_migration_repo(&stub);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(out.contains("warning MG004"), "{out}");
+    let json = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .args(["check", "--format", "json"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(v["outcome"], "could-not-check");
+    assert!(v["error"].as_str().unwrap().contains("MG813"), "{v}");
+    assert_eq!(v["findings"][0]["rule"], "MG004", "{v}");
+}

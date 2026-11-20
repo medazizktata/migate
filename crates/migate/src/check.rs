@@ -124,18 +124,25 @@ pub fn check(args: &CheckArgs) -> Outcome {
     let result =
         settings(&args.common, args.base.as_ref()).and_then(|s| run_check(&s).map(|r| (s, r)));
     match result {
-        Ok((s, (findings, files, checked, sandbox))) => {
+        Ok((s, c)) => {
             let cx = Context {
                 migrator: &s.migrator.id,
                 base: &s.base,
-                checked,
-                sandbox: sandbox.as_deref(),
-                files: &files,
+                checked: c.checked,
+                sandbox: c.sandbox.as_deref(),
+                not_checked: c.not_checked.as_deref(),
+                files: &c.files,
                 ledger: &s.ledger,
             };
-            print!("{}", output::render(args.format, &findings, &cx));
-            if findings.iter().any(|f| f.severity == Severity::Error) {
+            if let Some(e) = &c.not_checked {
+                eprintln!("migate: could not check: {e}");
+            }
+            print!("{}", output::render(args.format, &c.findings, &cx));
+            // An error found is a failure whatever else happened; only then does "could not check" decide.
+            if c.findings.iter().any(|f| f.severity == Severity::Error) {
                 Outcome::Errors
+            } else if c.not_checked.is_some() {
+                Outcome::CouldNotCheck
             } else {
                 Outcome::Clean
             }
@@ -150,13 +157,19 @@ pub fn check(args: &CheckArgs) -> Outcome {
     }
 }
 
-/// Findings, each migration's file, how many migrations were read, and the sandbox's engine and version if one ran.
-type Checked = (
-    Vec<Finding>,
-    BTreeMap<String, String>,
-    usize,
-    Option<String>,
-);
+/// What a check found.
+#[derive(Debug)]
+struct Checked {
+    findings: Vec<Finding>,
+    /// Migration id -> its file.
+    files: BTreeMap<String, String>,
+    /// How many migrations were read, so an empty pass shows as one.
+    checked: usize,
+    /// The sandbox's engine and version, when one ran (`postgres 18.6`).
+    sandbox: Option<String>,
+    /// Why the sandbox could not check, when it could not. The other findings still stand.
+    not_checked: Option<String>,
+}
 
 /// The findings, each migration's file, and how many migrations were read (so an empty pass is visible as one).
 fn run_check(s: &Settings) -> Result<Checked, String> {
@@ -197,18 +210,29 @@ fn run_check(s: &Settings) -> Result<Checked, String> {
         &applied,
     ));
 
-    let mut sandbox = None;
+    let (mut sandbox, mut not_checked) = (None, None);
     if let Some(cfg) = &s.sandbox {
-        let (found, engine) = crate::sandbox::run(cfg, &s.migrator, &s.root, &s.base)?;
-        findings.extend(found);
-        sandbox = Some(engine);
+        // A sandbox that cannot check must not hide what the ledger and the order rules found without it.
+        match crate::sandbox::run(cfg, &s.migrator, &s.root, &s.base) {
+            Ok((found, engine)) => {
+                findings.extend(found);
+                sandbox = Some(engine);
+            }
+            Err(e) => not_checked = Some(e),
+        }
     }
     let files = project
         .files
         .iter()
         .map(|f| (f.id.clone(), f.path.clone()))
         .collect();
-    Ok((findings, files, project.migrations.len(), sandbox))
+    Ok(Checked {
+        findings,
+        files,
+        checked: project.migrations.len(),
+        sandbox,
+        not_checked,
+    })
 }
 
 /// No migration found means nothing was checked: usually the wrong migrator, so name the ones whose layout matches.

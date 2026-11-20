@@ -21,6 +21,8 @@ pub struct Context<'a> {
     pub checked: usize,
     /// The throwaway database's engine and version, when a sandbox ran (`postgres 18.6`).
     pub sandbox: Option<&'a str>,
+    /// Why the sandbox could not check, when it could not; the other findings still stand.
+    pub not_checked: Option<&'a str>,
     /// Migration id -> its file, relative to the project; findings without one point at the ledger.
     pub files: &'a BTreeMap<String, String>,
     pub ledger: &'a str,
@@ -93,7 +95,12 @@ fn json_report(findings: &[Finding], cx: &Context) -> Value {
     let (e, w, n) = counts(findings);
     json!({
         "migate": env!("CARGO_PKG_VERSION"),
-        "outcome": if e > 0 { "errors" } else { "clean" },
+        "outcome": match (e > 0, cx.not_checked.is_some()) {
+            (true, _) => "errors",
+            (false, true) => "could-not-check",
+            (false, false) => "clean",
+        },
+        "error": cx.not_checked,
         "migrator": cx.migrator,
         "base": cx.base,
         "checked": cx.checked,
@@ -194,6 +201,13 @@ fn sarif(findings: &[Finding], cx: &Context) -> Value {
                 "rules": rules,
             }},
             "results": results,
+            "invocations": [{
+                "executionSuccessful": cx.not_checked.is_none(),
+                "toolExecutionNotifications": cx.not_checked.map_or(Vec::new(), |e| vec![json!({
+                    "level": "error",
+                    "message": { "text": e },
+                })]),
+            }],
         }],
     })
 }
