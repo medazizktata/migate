@@ -79,6 +79,22 @@ pub fn classify(changes: &[Change]) -> Vec<Finding> {
             _ => None,
         })
         .collect();
+    // Columns this change adds that start empty (no default, not generated, not identity): every existing row holds
+    // NULL there and no old code writes them, so a reference or UNIQUE on them alone cannot fail or break anything.
+    let empty_new: BTreeSet<(&str, &str, &str)> = changes
+        .iter()
+        .filter_map(|c| match c {
+            Change::Added(o) => match (&o.detail, &o.parent) {
+                (Detail::Column(col), Some(table))
+                    if col.default.is_none() && col.generated.is_none() && !col.identity =>
+                {
+                    Some((o.namespace.as_str(), table.as_str(), o.name.as_str()))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
     let mut out = Vec::new();
     for change in changes {
         let o = match change {
@@ -91,14 +107,47 @@ pub fn classify(changes: &[Change]) -> Vec<Finding> {
         {
             continue;
         }
+        let start = out.len();
         let mut emit = |id: &'static str, message: String| out.push(finding(id, o, message));
         match change {
             Change::Added(o) => added(o, &mut emit),
             Change::Dropped(o) => dropped(o, &mut emit),
             Change::Changed { base, head } => changed(base, head, &mut emit),
         }
+        if let (Change::Added(o), Some(table)) = (change, o.parent.as_deref())
+            && constrained_columns(o).is_some_and(|cols| {
+                !cols.is_empty()
+                    && cols
+                        .iter()
+                        .all(|c| empty_new.contains(&(o.namespace.as_str(), table, c.as_str())))
+            })
+        {
+            for f in &mut out[start..] {
+                f.severity = Severity::Note;
+                f.message
+                    .push_str(" on a column this change adds, empty in every existing row");
+            }
+        }
     }
     out
+}
+
+/// The plain columns a foreign key, UNIQUE or unique index constrains; `None` for anything else (a primary key forces
+/// NOT NULL, which existing rows fail; an expression or CHECK reads columns we cannot list).
+fn constrained_columns(o: &Object) -> Option<Vec<String>> {
+    match &o.detail {
+        Detail::ForeignKey(fk) => Some(fk.columns.clone()),
+        Detail::Unique { columns } => Some(columns.clone()),
+        Detail::Index(i) if i.unique => i
+            .parts
+            .iter()
+            .map(|p| match p {
+                crate::schema::IndexPart::Column { name, .. } => Some(name.clone()),
+                crate::schema::IndexPart::Expression { .. } => None,
+            })
+            .collect(),
+        _ => None,
+    }
 }
 
 fn finding(id: &'static str, o: &Object, message: String) -> Finding {
@@ -937,6 +986,59 @@ mod tests {
         assert!(narrows(&d(10, 2), &d(10, 4)), "fewer integer digits");
         assert!(narrows(&d(10, 4), &d(10, 2)), "fewer decimals");
         assert!(!narrows(&d(10, 2), &d(12, 2)));
+    }
+
+    #[test]
+    fn a_constraint_on_a_column_the_change_adds_empty_is_a_note() {
+        let base = with(base_objects(), on_t("t_a", index(false, &["a"])));
+        let fk_on = |col: &str| {
+            on_t(
+                &format!("t_{col}_fkey"),
+                Detail::ForeignKey(ForeignKey {
+                    columns: vec![col.into()],
+                    ..match fk("CASCADE") {
+                        Detail::ForeignKey(f) => f,
+                        _ => unreachable!(),
+                    }
+                }),
+            )
+        };
+        let found = |head: Vec<Object>| {
+            let (b, h) = (snap(base.clone()), snap(head));
+            classify(&diff(&b, &h))
+                .into_iter()
+                .map(|f| (f.rule, f.severity))
+                .collect::<Vec<_>>()
+        };
+        // A new, empty column: no existing row holds a value, no old code writes it.
+        let mut head = with(base.clone(), column("owner", 2, text(), true, None));
+        head.push(fk_on("owner"));
+        head.push(on_t(
+            "t_owner_key",
+            Detail::Unique {
+                columns: vec!["owner".into()],
+            },
+        ));
+        assert_eq!(
+            found(head),
+            [
+                ("MG210", Severity::Note),
+                ("MG302", Severity::Note),
+                ("MG303", Severity::Note)
+            ]
+        );
+        // A new column with a default fills every existing row with one value: UNIQUE or the reference can fail.
+        let mut head = with(base.clone(), column("owner", 2, text(), true, Some("'x'")));
+        head.push(fk_on("owner"));
+        assert_eq!(
+            found(head),
+            [("MG210", Severity::Note), ("MG303", Severity::Error)]
+        );
+        // An existing column stays an error.
+        assert_eq!(
+            found(with(base.clone(), fk_on("a"))),
+            [("MG303", Severity::Error)]
+        );
     }
 
     #[test]
