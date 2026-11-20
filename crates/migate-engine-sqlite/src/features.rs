@@ -25,8 +25,9 @@ pub fn dotted(n: u32) -> String {
 type Uses = fn(&Statement) -> bool;
 
 const FEATURES: &[(&str, u32, Uses)] = &[
+    // DO is reserved: it appears only in an upsert's DO UPDATE or DO NOTHING.
     ("UPSERT (ON CONFLICT ... DO)", 3_024_000, |s| {
-        s.after("conflict", |t| s.has_seq(t, &["do"]))
+        s.has_words(&["do", "update"]) || s.has_words(&["do", "nothing"])
     }),
     (
         "ALTER TABLE ... RENAME COLUMN",
@@ -52,10 +53,9 @@ const FEATURES: &[(&str, u32, Uses)] = &[
     ("-> or ->> operator", 3_038_000, |s| s.puncts('-', '>')),
     ("unixepoch()", 3_038_000, |s| s.calls(|f| f == "unixepoch")),
     ("RIGHT or FULL JOIN", 3_039_000, |s| {
-        s.has_words(&["right", "join"])
-            || s.has_words(&["right", "outer", "join"])
-            || s.has_words(&["full", "join"])
-            || s.has_words(&["full", "outer", "join"])
+        ["right", "full"]
+            .iter()
+            .any(|k| s.has_words(&[k, "join"]) || s.has_words(&[k, "outer", "join"]))
     }),
     ("concat(), concat_ws() or string_agg()", 3_044_000, |s| {
         s.calls(|f| matches!(f, "concat" | "concat_ws" | "string_agg"))
@@ -129,20 +129,6 @@ impl Statement {
         self.flat
             .windows(words.len())
             .any(|w| w.iter().zip(words).all(|(t, x)| Self::word(t, x)))
-    }
-
-    fn has_seq(&self, from: usize, words: &[&str]) -> bool {
-        self.flat[from..]
-            .windows(words.len())
-            .any(|w| w.iter().zip(words).all(|(t, x)| Self::word(t, x)))
-    }
-
-    /// `check` holds for some position after the word `w`.
-    fn after(&self, w: &str, check: impl Fn(usize) -> bool) -> bool {
-        self.flat
-            .iter()
-            .position(|t| Self::word(t, w))
-            .is_some_and(|i| check(i + 1))
     }
 
     fn punct_then_word(&self, p: char, w: &str) -> bool {
@@ -221,12 +207,12 @@ impl Statement {
     }
 }
 
-/// The statements of `sql`, split at each `;` outside quotes, comments and parentheses, with the line each starts on.
+/// The statements of `sql`, split at each `;` outside quotes and comments, with the line each starts on.
 /// A trigger body is split at its inner `;` too, which only makes the reported lines more precise.
 fn statements(sql: &str) -> Vec<(u32, String)> {
     let c: Vec<char> = sql.chars().collect();
     let (mut out, mut current, mut begun) = (Vec::new(), String::new(), None::<u32>);
-    let (mut line, mut depth, mut i) = (1u32, 0usize, 0usize);
+    let (mut line, mut i) = (1u32, 0usize);
     while i < c.len() {
         let ch = c[i];
         let take = |n: usize, current: &mut String, line: &mut u32| {
@@ -267,18 +253,14 @@ fn statements(sql: &str) -> Vec<(u32, String)> {
             i = end;
             continue;
         }
-        match ch {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            ';' if depth == 0 => {
-                if let Some(start) = begun.take() {
-                    out.push((start, std::mem::take(&mut current)));
-                }
-                current.clear();
-                i += 1;
-                continue;
+        // A `;` inside parentheses is inside a string in valid SQL, and strings are skipped above: no depth to track.
+        if ch == ';' {
+            if let Some(start) = begun.take() {
+                out.push((start, std::mem::take(&mut current)));
             }
-            _ => {}
+            current.clear();
+            i += 1;
+            continue;
         }
         take(1, &mut current, &mut line);
         i += 1;
@@ -306,7 +288,7 @@ mod tests {
         assert_eq!(version_number("3.37"), Some(3_037_000));
         assert_eq!(version_number(" 3.8.11 "), Some(3_008_011));
         assert_eq!(dotted(3_035_005), "3.35.5");
-        for bad in ["", "3", "4.1", "3.x", "3.1.2.3", "3.1000"] {
+        for bad in ["", "3", "4.1", "3.x", "3.1.2.3", "3.1000", "3.1.1000"] {
             assert_eq!(version_number(bad), None, "{bad:?}");
         }
     }
@@ -375,8 +357,74 @@ CREATE TABLE copy AS SELECT CAST(id AS TEXT) AS id FROM people;
 CREATE TABLE k (id INTEGER PRIMARY KEY ON CONFLICT REPLACE, v TEXT) WITHOUT ROWID;
 -- a comment saying RETURNING, DROP COLUMN and ->> is not SQL
 SELECT 'RETURNING ->> concat(' AS s, json_extract(d, '$.a'), \"right\" FROM t;
-CREATE TRIGGER tr AFTER INSERT ON people BEGIN UPDATE people SET age = 1; END;";
+CREATE TRIGGER tr AFTER INSERT ON people BEGIN UPDATE people SET age = 1; END;
+CREATE TABLE strict (a INTEGER);
+WITH c AS (SELECT 1) SELECT * FROM c;
+CREATE VIEW v AS WITH c AS (SELECT 1) SELECT * FROM c;
+DROP TABLE IF EXISTS old;";
         assert_eq!(found(sql, "3.20"), []);
+    }
+
+    #[test]
+    fn each_spelling_and_position_a_feature_can_take() {
+        const DROP: &str = "ALTER TABLE ... DROP COLUMN";
+        let cases: &[(&str, &[(u32, &str)])] = &[
+            (
+                "CREATE TABLE t (a INT, b INT AS (a * 2));",
+                &[(1, "generated column")],
+            ),
+            (
+                "INSERT INTO t VALUES (1) ON CONFLICT (a) DO UPDATE SET b = 2;",
+                &[(1, "UPSERT (ON CONFLICT ... DO)")],
+            ),
+            (
+                "SELECT * FROM a FULL JOIN b ON 1;",
+                &[(1, "RIGHT or FULL JOIN")],
+            ),
+            (
+                "SELECT * FROM a FULL OUTER JOIN b ON 1;",
+                &[(1, "RIGHT or FULL JOIN")],
+            ),
+            (
+                "SELECT * FROM a RIGHT OUTER JOIN b ON 1;",
+                &[(1, "RIGHT or FULL JOIN")],
+            ),
+            ("ALTER TABLE main.users DROP COLUMN legacy;", &[(1, DROP)]),
+            // A lone `-` or `/` is an operator, not the start of a comment that would hide the next statement.
+            ("SELECT 1 - 1; ALTER TABLE t DROP COLUMN c;", &[(1, DROP)]),
+            ("SELECT 4 / 2; ALTER TABLE t DROP COLUMN c;", &[(1, DROP)]),
+            // A block comment ends at its own `*/`, whatever it holds and wherever it starts.
+            (
+                "SELECT 1; /* note: a*b; c */ ALTER TABLE t DROP COLUMN c;",
+                &[(1, DROP)],
+            ),
+            (
+                "SELECT 1; /* c */ ALTER TABLE t DROP COLUMN c;",
+                &[(1, DROP)],
+            ),
+            // The `*/` must be searched for after the `/*`: in `/*/` the opening slash is not a closing one.
+            (
+                "SELECT 1; /*/ x; */ ALTER TABLE t DROP COLUMN c;",
+                &[(1, DROP)],
+            ),
+            // A `;` inside a string, even across lines, ends nothing.
+            (
+                "SELECT 'x;\ny';\nALTER TABLE t DROP COLUMN c;",
+                &[(3, DROP)],
+            ),
+            // Comments after the first statement still count their lines.
+            (
+                "SELECT 1; -- c\nSELECT 2;\nSELECT 3 RETURNING x;",
+                &[(3, "RETURNING")],
+            ),
+            (
+                "SELECT 1; /* a\nb */ SELECT 2;\nSELECT 3 RETURNING x;",
+                &[(3, "RETURNING")],
+            ),
+        ];
+        for (sql, want) in cases {
+            assert_eq!(found(sql, "3.20"), *want, "{sql}");
+        }
     }
 
     #[test]
