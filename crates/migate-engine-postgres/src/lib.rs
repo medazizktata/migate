@@ -149,6 +149,43 @@ impl Drop for Server {
     }
 }
 
+/// Stop the server a killed run left running in `dir` (the folder [`Server::start`] was given), if any. Its data
+/// folder names the server's process id; that process is signalled only if it is still that very server, since
+/// process ids are reused.
+pub fn stop_left_server(dir: &Path) {
+    let data = dir.join("pgdata");
+    let Some(pid) = std::fs::read_to_string(data.join("postmaster.pid"))
+        .ok()
+        .and_then(|text| text.lines().next()?.trim().parse::<u32>().ok())
+    else {
+        return;
+    };
+    let pid = pid.to_string();
+    let command = Command::new("ps")
+        .args(["-p", &pid, "-o", "command="])
+        .output();
+    let is_that_server = command.is_ok_and(|out| {
+        let line = String::from_utf8_lossy(&out.stdout);
+        line.contains("postgres") && line.contains(&*data.to_string_lossy())
+    });
+    if !is_that_server {
+        return;
+    }
+    let _ = Command::new("kill").args(["-INT", &pid]).status();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let alive = Command::new("kill")
+            .args(["-0", &pid])
+            .stderr(Stdio::null())
+            .status();
+        if !alive.is_ok_and(|s| s.success()) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = Command::new("kill").args(["-KILL", &pid]).status();
+}
+
 impl engine::Sandbox for Server {
     fn placeholders(&self) -> Vec<(&'static str, String)> {
         vec![("url", self.url.clone())]

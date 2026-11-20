@@ -614,6 +614,8 @@ fn sweep(root: &Path, own: &Path) {
             .status()
             .is_ok_and(|s| s.success());
         if mine && pid != me && !alive {
+            // A Postgres the killed run started outlives it; stop it before its folder goes.
+            migate_engine_postgres::stop_left_server(&entry.path().join("db"));
             let _ = std::fs::remove_dir_all(entry.path());
         }
     }

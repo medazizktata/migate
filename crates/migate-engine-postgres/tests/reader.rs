@@ -292,3 +292,23 @@ fn a_dropped_server_is_gone() {
         .success();
     assert!(!alive, "postgres {pid} still running");
 }
+
+#[test]
+fn a_stale_pid_file_never_stops_another_process() {
+    // A killed run's folder whose recorded server is gone, its process id now someone else's.
+    let dir = Dir::new();
+    let mut other = Command::new("sleep").arg("30").spawn().unwrap();
+    std::fs::create_dir_all(dir.0.join("pgdata")).unwrap();
+    std::fs::write(
+        dir.0.join("pgdata/postmaster.pid"),
+        format!("{}\n", other.id()),
+    )
+    .unwrap();
+    migate_engine_postgres::stop_left_server(&dir.0);
+    assert!(
+        other.try_wait().unwrap().is_none(),
+        "an unrelated process was stopped"
+    );
+    other.kill().unwrap();
+    other.wait().unwrap();
+}

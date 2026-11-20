@@ -1345,3 +1345,43 @@ fn an_interrupted_postgres_run_stops_its_server() {
         "the server outlived the interrupt"
     );
 }
+
+#[test]
+fn the_next_run_stops_the_server_a_killed_run_left() {
+    let r = pg_repo("alter table users add column nickname text;");
+    let own_tmp = std::env::temp_dir().join(format!("migate-pg-kill-{}", std::process::id()));
+    fs::create_dir_all(&own_tmp).unwrap();
+    r.write(
+        "slow.toml",
+        &PG_TOML.replace("test = \"sh old_app.sh\"", "test = \"sleep 30\""),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .args(["check", "--config", "slow.toml"])
+        .env("TMPDIR", &own_tmp)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    for _ in 0..400 {
+        if postgres_servers_under(&own_tmp) == 1 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    child.kill().unwrap(); // SIGKILL: no handler runs
+    child.wait().unwrap();
+    assert_eq!(
+        postgres_servers_under(&own_tmp),
+        1,
+        "a killed run's server keeps running (the precondition)"
+    );
+    let (code, out, err) = sandbox_check(&r, &[("TMPDIR", &*own_tmp.to_string_lossy())]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        postgres_servers_under(&own_tmp),
+        0,
+        "the next run left the killed run's server running"
+    );
+    let _ = fs::remove_dir_all(&own_tmp);
+}
