@@ -45,7 +45,7 @@ Adapters depend on `migate-core`; `migate-core` depends on no migate crate. The 
 
 `migate-core`'s dependency tree may contain only crates on an explicit allowlist in `scripts/check-core-deps.sh` (today
 `sha2` and its tree). The script runs in `scripts/check.sh`, the pre-commit hook's full counterpart, and in CI. It was
-shown failing with `rusqlite` and with `tokio` added to the core (commit c62d8c5). Adding a crate to the core means
+shown failing with `rusqlite` and with `tokio` added to the core (commit 4eae4c6). Adding a crate to the core means
 adding it to the allowlist in the same change, on purpose, and saying why in the commit.
 
 The workspace lints add `unsafe_code = "forbid"` and refuse `unwrap()` outside tests.

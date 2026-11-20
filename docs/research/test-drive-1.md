@@ -1,6 +1,6 @@
 # Test drive 1: a blind agent uses migate on real projects
 
-Date: 2026-11-19. Commit tested: `a78f4a8`. A context-free agent was given the repository (read-only), the build
+Date: 2026-11-19. Commit tested: `15d8e3a`. A context-free agent was given the repository (read-only), the build
 command and the documentation, and asked to establish how migate behaves on realistic projects and whether the
 documentation's claims hold. It was not told what the authors believed worked. The brief is in the session scratchpad;
 its six areas were getting started, the ledger checks, real projects through `[sandbox]`, output formats, messages, and
