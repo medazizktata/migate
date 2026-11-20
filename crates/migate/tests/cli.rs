@@ -1699,3 +1699,34 @@ fn without_tests_the_schema_rule_still_decides() {
     assert_eq!(code, 2, "{out}{err}");
     assert!(out.contains("error   MG503"), "{out}");
 }
+
+#[test]
+fn a_base_suite_that_flakes_once_is_retried_rather_than_refused() {
+    // Fails the first time only, as a busy database at start-up does, then behaves like the old app.
+    let flaky = SANDBOX_TOML.replace(
+        "test = \"python3 old_app.py\"",
+        "test = 'if [ ! -e .flaked ]; then touch .flaked; echo \"SQLITE_BUSY: database is locked\" >&2; exit 1; fi; python3 old_app.py'",
+    );
+    let r = sandbox_repo(&flaky, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        err.contains("SQLITE_BUSY") && err.contains("again"),
+        "the flake is reported, not hidden: {err}"
+    );
+}
+
+#[test]
+fn a_base_suite_that_always_fails_is_still_refused_after_the_retry() {
+    let failing = SANDBOX_TOML.replace(
+        "test = \"python3 old_app.py\"",
+        "test = 'echo broken >&2; exit 1'",
+    );
+    let r = sandbox_repo(&failing, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("MG813") && err.contains("fail on the database at"),
+        "{err}"
+    );
+}

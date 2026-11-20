@@ -235,7 +235,15 @@ pub fn run(
     // Calibration, before the check: the tests must pass on their own version's database.
     if let Some(test) = &cfg.test {
         eprintln!("migate: running the base version's tests on its own database first");
-        let out = sh(&vars(test), &base_dir, &env)?;
+        let mut out = sh(&vars(test), &base_dir, &env)?;
+        if !out.status.success() {
+            // One retry: a one-off flake (a busy database while a runtime starts) should not cost the verdict.
+            eprintln!(
+                "migate: the base version's tests failed on their own database; running them once again:\n{}",
+                tail(&out)
+            );
+            out = sh(&vars(test), &base_dir, &env)?;
+        }
         if !out.status.success() {
             return Err(invalid(format!(
                 "the base version's tests fail on the database at {base}, before any new migration, so their \
@@ -474,6 +482,10 @@ fn excerpt(text: &str) -> String {
     let plain = strip_ansi(text);
     let lines: Vec<&str> = plain.lines().filter(|l| !l.trim().is_empty()).collect();
     let failing = |l: &&str| {
+        // A passing test named after a failure case ("✓ a failure at item 9 ...") is not a failure.
+        if l.trim_start().starts_with(['\u{2713}', '\u{2714}']) {
+            return false;
+        }
         let l = l.to_ascii_lowercase();
         ["error", "fail", "exception", "traceback", "assert"]
             .iter()
@@ -532,6 +544,25 @@ mod tests {
             got,
             "FAIL tests/users.test.ts > creates a user\nError: table users has no column named legacy\n...\n    at frame 16\n    at frame 17\n    at frame 18\n    at frame 19\n Test Files  1 failed | 4 passed (5)"
         );
+    }
+
+    #[test]
+    fn passing_tests_whose_names_say_fail_do_not_crowd_out_the_failures() {
+        // From a real vitest run: six failures, with passing tests named after failure cases in between.
+        let mut out = String::new();
+        for i in 0..6 {
+            out.push_str(&format!(
+                "   \u{2713} a failure at item {i} leaves nothing behind\n"
+            ));
+            out.push_str(&format!(" FAIL  tests/quotes.spec.ts > case {i}\n"));
+        }
+        out.push_str(&"summary\n".repeat(5));
+        let got = excerpt(&out);
+        assert!(
+            (0..6).all(|i| got.contains(&format!("> case {i}"))),
+            "{got}"
+        );
+        assert!(!got.contains('\u{2713}'), "{got}");
     }
 
     #[test]
