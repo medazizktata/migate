@@ -110,6 +110,6 @@ volume, locks and timeouts; Django in a pre-booted process (assumed to have no s
 "cached plan must not change result type"; the Payload-on-D1 app NOT NULL, type-change, #5171 and rollback fixtures; the Payload-on-D1 app head
 commits with code changes; e2e suites; Django renames.
 
-**Side finding in the Payload-on-D1 app:** its D1 runner applies every `.ts` file in the
+**Side finding in the Payload-on-D1 app:** its D1 runner  applies every `.ts` file in the
 migrations folder, while the SQL test helper follows `index.ts`; a stray file in the folder is applied by one and not
 the other.

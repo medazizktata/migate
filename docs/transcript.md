@@ -76,7 +76,7 @@ When they report, I'll check their key claims and combine them into one report w
 
 #### Design assessment: a generic tool that guards migrations in production
 
-Legend: **V** means I read the primary source or doc myself. **R** means relayed from a secondary source or from memory. **U** means unknown. I modified nothing. The one thing I ran was a read-only Node probe in the scratchpad that imports the local check's functions (`/private/tmp/claude-501/-Users-MAC-Desktop-the Payload-on-D1 app/a58d04c9-5ac0-4a91-a3c0-41f23df8fa07/scratchpad/probe.mjs`).
+Legend: **V** means I read the primary source or doc myself. **R** means relayed from a secondary source or from memory. **U** means unknown. I modified nothing. The one thing I ran was a read-only Node probe in the scratchpad that imports the local check's functions (in the session's scratchpad).
 
 ##### 0. The local data point (the origin project's own migration checks)
 

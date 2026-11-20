@@ -8,8 +8,9 @@ the SQLite engine and may be an early plug-in, never the product's identity; Pos
   revenue, SQLite then PostgreSQL in the first release, independent of any vendor. The primary check is a mixed-version
   test (the live version's tests or queries against the migrated database); the schema diff is the fast first pass and
   fallback. Anything not listed there: ask the owner, give a recommendation, do not assume.
-- migate stands alone: files and commit messages never name the owner's other projects. The Payload app on Cloudflare D1
-  that the spikes ran on is called `the Payload-on-D1 app`. Known limits of the approach it started from: a text-based
+- migate stands alone; it has branched off from the project it started in. Files and commit messages never name or
+  describe the owner's other projects: no names, paths, schemas, test names or internal documents. Evidence gathered on
+  one is written generically ("a Payload app on D1"). Known limits of the approach it started from: a text-based
   breaking-change check misses triggers, constraints, views and runtime SQL, and a schema diff alone misses breaking
   additions (`docs/research/blind-review.md`).
 - Work directly on `main`; no feature branches while the project is early.

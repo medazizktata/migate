@@ -472,8 +472,7 @@ comparison, the production checks and the migration itself run across every tena
 - **Per-file entries, not chained.** atlas.sum chains on purpose (the hasher is never reset, so each entry covers every
   previous file; V, `sql/migrate/dir.go:662-679`, e933d0b), which forces merge conflicts. Our order models give the same
   protection without the friction.
-- **Append-only against the base branch**; fail if the base cannot be read in CI (V, prior art
-  `the origin project's migration check:69-92`).
+- **Append-only against the base branch**; fail if the base cannot be read in CI (V, prior art).
 - **The authority is a tool-owned production table** `migration_guard_ledger(id, sha256, commit, released_at,
   tool_version)`, written by the release after re-reading the migrator's history (it does not assume everything ran).
   The committed ledger is the CI copy, and both must agree (MG010-MG012). Fallback where the table cannot be created: the
