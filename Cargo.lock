@@ -499,6 +499,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "migate-core",
+ "migate-engine-postgres",
  "migate-engine-sqlite",
  "migate-migrators",
  "serde",

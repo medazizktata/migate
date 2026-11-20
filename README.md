@@ -6,7 +6,8 @@ migration that would break the running app is stopped before it ships. It also s
 production ran it, from running out of order or being silently skipped, and from disagreeing with production's own
 history.
 
-Status: early, not released. Works today on SQLite projects, Cloudflare D1's local mode included. `docs/product.md`
+Status: early, not released. Works today on SQLite projects (Cloudflare D1's local mode included) and on PostgreSQL
+projects, with a throwaway local server. `docs/product.md`
 marks what is built and what is planned. (Earlier documents call it `migration-guard`, its working name.)
 Licence: Apache-2.0 (`LICENSE`). Start here:
 
@@ -63,6 +64,16 @@ there; it only needs the database's name from your wrangler configuration:
 migrator = "wrangler-d1"
 [sandbox]
 database_name = "app"
+test = "npm test"
+```
+
+For PostgreSQL, migate starts a throwaway server from the machine's own Postgres (found on PATH, in the usual install
+folders, or at `MIGATE_PG_BIN`) and stops it when the run ends or is cancelled:
+
+```toml
+[sandbox]
+engine = "postgres"
+env = { DATABASE_URL = "{url}" }   # postgresql://migate@127.0.0.1:<free port>/migate
 test = "npm test"
 ```
 

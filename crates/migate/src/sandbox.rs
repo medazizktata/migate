@@ -22,7 +22,7 @@ use migate_core::engine;
 use migate_core::{Finding, Severity};
 use migate_migrators::Migrator;
 
-use crate::config::Sandbox;
+use crate::config::{Engine, Sandbox};
 use crate::project;
 
 /// Variables passed from migate's own environment without being asked for: the toolchain's, never a connection or a
@@ -78,10 +78,17 @@ pub fn run(
         .as_deref()
         .filter(|_| cfg.migrate.is_none());
     let in_dir = |s: &str| s.replace("{dir}", &dir.to_string_lossy());
-    let sandbox: Box<dyn engine::Sandbox> = Box::new(migate_engine_sqlite::Throwaway::new(
-        dir.join("sandbox.db"),
-        cfg.database.as_deref().or(tool_location).map(in_dir),
-    ));
+    let sandbox: Box<dyn engine::Sandbox> = match cfg.engine {
+        Engine::Sqlite => Box::new(migate_engine_sqlite::Throwaway::new(
+            dir.join("sandbox.db"),
+            cfg.database.as_deref().or(tool_location).map(in_dir),
+        )),
+        Engine::Postgres => Box::new(migate_engine_postgres::Server::start(&dir)?),
+    };
+    // A server the sandbox runs is stopped with the run's commands if the run is interrupted.
+    if let Some(group) = sandbox.process_group() {
+        live().groups.push(group);
+    }
     let placeholders = sandbox.placeholders();
     let vars = |s: &str| {
         let mut s = in_dir(s).replace("{database}", &name);

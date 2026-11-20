@@ -8,6 +8,7 @@
 //!
 //! # Optional: migrate a throwaway SQLite database at base and at head, diff the schemas, run the base version's tests.
 //! [sandbox]
+//! engine = "sqlite"                            # or "postgres": a local server, {url} is its connection URL
 //! env = { DATABASE_URL = "sqlite:///{db}" }   # how the project is told where the database is; {db} is its path
 //! database_name = "app"                        # Wrangler D1: the database's name in wrangler.toml
 //! shared = "apps/web/.wrangler"                # a database the project keeps inside its own checkout
@@ -34,10 +35,23 @@ pub struct Config {
     pub sandbox: Option<Sandbox>,
 }
 
-/// `[sandbox]`. In commands and values, `{db}` is the throwaway database's path and `{dir}` the folder holding it.
+/// The database engine the throwaway database runs on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Sqlite,
+    /// A local PostgreSQL server started for the run; `{url}` is its connection URL.
+    Postgres,
+}
+
+/// `[sandbox]`. In commands and values, `{db}` is the throwaway SQLite database's path, `{url}` the throwaway Postgres
+/// server's connection URL, and `{dir}` the run's folder.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sandbox {
+    #[serde(default)]
+    pub engine: Engine,
     /// Variables for every command, on top of the migrator's own.
     #[serde(default)]
     pub env: BTreeMap<String, String>,

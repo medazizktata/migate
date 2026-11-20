@@ -213,7 +213,8 @@ planned before large-database support is claimed.
 | `migate check` with `[sandbox]`: migrate a throwaway SQLite database at base and HEAD, diff, run the base version's tests | built and tested (fresh mode; Rails needs the pre-boot mode, not built) |
 | Test runs proven to use the database (MG813); rows lost by the migrations (MG105) | built and tested |
 | A blind test drive on real Django, Rails, Drizzle, Prisma and D1 projects | done (`research/test-drive-1.md`); its findings are being fixed |
-| The Postgres reader, the pre-boot runner, production checks, PR comment | planned (backlog) |
+| The PostgreSQL engine: a throwaway local server per run and a catalog reader, behind an engine plug-in interface | built and tested on PostgreSQL 18 (partitions and extension objects skipped) |
+| The pre-boot runner, production checks, PR comment | planned (backlog) |
 | First public release | not yet |
 
 Name: migate. Licence: Apache-2.0. Language: Rust.

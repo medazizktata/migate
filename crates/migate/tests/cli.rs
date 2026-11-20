@@ -1190,3 +1190,158 @@ fn a_project_whose_runner_refuses_late_migrations_can_say_so() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+// The sandbox run on the PostgreSQL engine: a local server per run, migrated by a small psql script.
+const PG_APPLY: &str = r#"set -e
+q() { psql -X -q -v ON_ERROR_STOP=1 -d "$DATABASE_URL" "$@"; }
+q -c "create table if not exists d1_migrations (id serial primary key, name text unique)"
+for f in migrations/*.sql; do
+  n=$(basename "$f")
+  [ -n "$(psql -X -A -t -d "$DATABASE_URL" -c "select 1 from d1_migrations where name = '$n'")" ] && continue
+  q -f "$f"
+  q -c "insert into d1_migrations (name) values ('$n')"
+done
+"#;
+
+const PG_OLD_APP: &str = r#"psql -X -q -v ON_ERROR_STOP=1 -d "$DATABASE_URL" -c "insert into users (email, legacy) values ('a@b.c', 'x')" -c "select id, email, legacy from users"
+"#;
+
+const PG_TOML: &str = r#"migrator = "wrangler-d1"
+base = "main"
+[sandbox]
+engine = "postgres"
+migrate = "sh apply.sh"
+env = { DATABASE_URL = "{url}" }
+test = "sh old_app.sh"
+"#;
+
+fn pg_repo(second: &str) -> Repo {
+    let r = Repo::new();
+    r.write("migate.toml", PG_TOML);
+    r.write("apply.sh", PG_APPLY);
+    r.write("old_app.sh", PG_OLD_APP);
+    r.write(
+        "migrations/0001_init.sql",
+        "create table users (id serial primary key, email text not null, legacy text);",
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write("migrations/0002_change.sql", second);
+    r.commit("change");
+    r
+}
+
+fn postgres_servers_under(dir: &std::path::Path) -> usize {
+    let ps = Command::new("ps")
+        .args(["-Ao", "command"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&ps.stdout)
+        .lines()
+        .filter(|l| l.contains("postgres -D") && l.contains(&*dir.to_string_lossy()))
+        .count()
+}
+
+#[test]
+fn postgres_sandbox_catches_a_dropped_column_the_old_version_writes() {
+    let r = pg_repo("alter table users drop column legacy;");
+    // A temp folder of its own, so servers of other tests running in parallel are not counted.
+    let own_tmp = std::env::temp_dir().join(format!(
+        "migate-pg-tmp-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    fs::create_dir_all(&own_tmp).unwrap();
+    let (code, out, err) = sandbox_check(&r, &[("TMPDIR", &*own_tmp.to_string_lossy())]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG201") && out.contains("public.users.legacy"),
+        "{out}"
+    );
+    assert!(out.contains("MG810") && out.contains("legacy"), "{out}");
+    assert_eq!(
+        postgres_servers_under(&own_tmp),
+        0,
+        "a postgres server outlived the run"
+    );
+    let _ = fs::remove_dir_all(&own_tmp);
+}
+
+#[test]
+fn postgres_sandbox_passes_a_safe_addition() {
+    let r = pg_repo("alter table users add column nickname text;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("MG210") && out.contains("public.users.nickname") && !out.contains("MG810"),
+        "{out}"
+    );
+}
+
+#[test]
+fn an_unknown_engine_is_refused_where_the_config_is_read() {
+    let r = pg_repo("select 1;");
+    r.write(
+        "migate.toml",
+        &PG_TOML.replace("\"postgres\"", "\"postgress\""),
+    );
+    let (code, _, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("unknown variant `postgress`"), "{err}");
+}
+
+#[test]
+fn an_interrupted_postgres_run_stops_its_server() {
+    let r = pg_repo("alter table users add column nickname text;");
+    let started = r.dir.join("started");
+    r.write(
+        "migate.toml",
+        &PG_TOML.replace(
+            "test = \"sh old_app.sh\"",
+            &format!(
+                "test = \"touch {} && sleep 5 && sh old_app.sh\"",
+                started.display()
+            ),
+        ),
+    );
+    r.commit("slow tests");
+    let child = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .arg("check")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    for _ in 0..400 {
+        if started.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(started.exists(), "the test command never started");
+    let run = std::env::temp_dir().join(format!("migate-run-{}-0", child.id()));
+    assert_eq!(
+        postgres_servers_under(&run),
+        1,
+        "the run's server is up before the interrupt"
+    );
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        postgres_servers_under(&run),
+        0,
+        "the server outlived the interrupt"
+    );
+}
