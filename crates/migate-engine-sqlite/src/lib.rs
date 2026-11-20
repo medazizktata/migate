@@ -117,6 +117,27 @@ pub fn row_counts(path: &Path) -> Result<BTreeMap<String, u64>, Error> {
     Ok(counts)
 }
 
+/// Whether the database at `path` was last written by a newer SQLite than the one compiled into migate, and which.
+/// Bytes 96-99 of the file header hold the last writer's version number; SQLite writes them and never checks them.
+pub fn newer_writer(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut header = [0u8; 100];
+    std::fs::File::open(path)
+        .ok()?
+        .read_exact(&mut header)
+        .ok()?;
+    let writer = u32::from_be_bytes([header[96], header[97], header[98], header[99]]);
+    let reader = u32::try_from(rusqlite::version_number()).unwrap_or(u32::MAX);
+    let dotted = |n: u32| format!("{}.{}.{}", n / 1_000_000, n / 1000 % 1000, n % 1000);
+    (writer > reader).then(|| {
+        format!(
+            "the migrations ran with SQLite {}, newer than the {} migate reads the database with",
+            dotted(writer),
+            dotted(reader)
+        )
+    })
+}
+
 /// What the model does not cover in the database at `path`, as `category name` -> definition: a virtual table's module
 /// and arguments (its columns are modelled).
 pub fn unmodelled(path: &Path) -> Result<BTreeMap<String, String>, Error> {
@@ -804,6 +825,9 @@ struct File(PathBuf);
 impl engine::Database for File {
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
         unmodelled(&self.0).map_err(|e| e.0)
+    }
+    fn newer_writer(&self) -> Option<String> {
+        newer_writer(&self.0)
     }
     fn snapshot(&self) -> Result<Snapshot, String> {
         snapshot(&self.0).map_err(|e| e.0)

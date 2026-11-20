@@ -264,7 +264,17 @@ pub fn run(
     eprintln!("migate: migrating it to HEAD");
     let out = sh(&migrate, &head_dir, &migrate_env)?;
     let after = db.snapshot()?;
+    // Read now: migate's own calibration writes to the file later, which would record migate's version instead.
+    let newer_writer = db.newer_writer();
     let mut findings = Vec::new();
+    if let Some(why) = newer_writer {
+        findings.push(Finding::new(
+            "MG805",
+            Severity::Warning,
+            "sandbox",
+            format!("{why}: a feature newer than migate's SQLite may be misread or unreadable; update migate"),
+        ));
+    }
     let migrated = out.status.success();
     if !migrated {
         findings.push(Finding::new(

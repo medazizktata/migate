@@ -323,6 +323,11 @@ impl engine::Database for Db<'_> {
         Ok(counts)
     }
 
+    /// The server reads its own files: there is no separate reader to be older.
+    fn newer_writer(&self) -> Option<String> {
+        None
+    }
+
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
         let mut out = BTreeMap::new();
         for r in rows(&self.0.bin, &self.0.url, &unmodelled_query())? {

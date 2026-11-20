@@ -228,6 +228,12 @@ pub const RULES: &[Rule] = &[
         axes: "",
     },
     Rule {
+        id: "MG805",
+        name: "newer-writer",
+        description: "The migrations ran with a newer SQLite than the one migate reads the database with. A feature newer than migate's SQLite may be misread or unreadable; update migate.",
+        axes: "",
+    },
+    Rule {
         id: "MG803",
         name: "head-migration-failed",
         description: "The pull request's migrations fail on a database migrated to the base branch. Deploying fails, and a tool without transactions leaves the changes made so far behind.",

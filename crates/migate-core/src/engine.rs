@@ -25,6 +25,9 @@ pub trait Database {
     /// Every column's count of non-NULL values, by `namespace.table.column`: what a migration can blank without losing
     /// a row.
     fn value_counts(&self) -> Result<BTreeMap<String, u64>, String>;
+    /// Why this reader may misread the database, if it might: the database was last written by a newer engine
+    /// version than the one reading it.
+    fn newer_writer(&self) -> Option<String>;
     /// Every object the schema model does not cover, as `category name` -> its definition text, so a change to one is
     /// reported as not checked rather than passing in silence.
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String>;

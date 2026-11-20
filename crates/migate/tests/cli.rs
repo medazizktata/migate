@@ -1874,3 +1874,30 @@ fn sqlite_names_a_changed_virtual_table_as_not_checked() {
         "{out}{err}"
     );
 }
+
+/// The applier, then the header bytes a newer SQLite writes: bytes 96-99 hold the version of the last writer, and
+/// SQLite itself never reads them, so this is what a file from SQLite 3.99.0 looks like to a reader.
+const APPLY_AS_NEWER_SQLITE: &str = r#"python3 apply.py && python3 -c "import os; f = open(os.environ['D1_PATH'], 'r+b'); f.seek(96); f.write((3099000).to_bytes(4, 'big'))" "#;
+
+#[test]
+fn a_database_written_by_a_newer_sqlite_is_flagged() {
+    let newer = SANDBOX_TOML.replace(
+        "migrate = \"python3 apply.py\"",
+        &format!("migrate = \"\"\"{APPLY_AS_NEWER_SQLITE}\"\"\""),
+    );
+    let r = sandbox_repo(&newer, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "a warning, not an error: {out}{err}");
+    assert!(
+        out.contains("warning MG805") && out.contains("SQLite 3.99.0"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_database_written_by_an_older_or_the_same_sqlite_is_not_flagged() {
+    let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!out.contains("MG805"), "{out}");
+}
