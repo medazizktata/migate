@@ -85,6 +85,16 @@ The schema diff covers tables, columns, keys, constraints, indexes, views, trigg
 A change to anything else (a policy, a grant, a domain, an exclusion constraint, a partition and the like) is named
 as not checked (MG801): only the base version's tests judged it.
 
+Test frameworks that build their own test database must be told to use the migrated one, or migate cannot judge the
+run:
+
+- **Django:** `test = "python manage.py test --keepdb"`, with `DATABASES["default"]["TEST"]["NAME"]` set to the
+  migrated database (`migate` on Postgres, the `{db}` file on SQLite). Without `--keepdb` Django rebuilds the database
+  from the old migrations and the run proves nothing.
+- **Rails:** `DATABASE_URL` set to `{url}`, `PARALLEL_WORKERS=1` (workers rebuild their own databases) and
+  `config.active_record.maintain_test_schema = false` in the test environment (otherwise Rails reloads the old
+  `schema.rb` over the migrated database).
+
 Migrate commands that use `npx` never download a package the project does not have.
 
 Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--format sarif` for machines.

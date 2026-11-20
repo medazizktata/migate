@@ -267,7 +267,8 @@ pub fn run(
             "head migrations",
             format!(
                 "the migrations fail on a database at {base}; any schema change they made before failing is a finding \
-                 of its own:\n{}",
+                 of its own.{}\n{}",
+                held_rows(&rows_before),
                 tail(&out)
             ),
         ));
@@ -470,6 +471,24 @@ fn sh(command: &str, dir: &Path, env: &BTreeMap<String, String>) -> Result<Outpu
     out
 }
 
+/// The rows the database held when the head migrations ran (the base migrations', the seed's and the base tests'):
+/// a constraint or NOT NULL column those rows break fails the migration, though its SQL is sound.
+fn held_rows(rows: &BTreeMap<String, u64>) -> String {
+    let held: Vec<String> = rows
+        .iter()
+        .filter(|(_, n)| **n > 0)
+        .map(|(t, n)| format!("{t} ({n} rows)"))
+        .collect();
+    if held.is_empty() {
+        return String::new();
+    }
+    format!(
+        " The database held rows when they ran, which production will too: {}. A constraint, unique index or \
+         NOT NULL column those rows break fails this way.",
+        held.join(", ")
+    )
+}
+
 /// What a failed command said, for the report: exit status, then [`excerpt`] of its output.
 fn tail(out: &Output) -> String {
     let text = format!(
@@ -496,9 +515,17 @@ fn excerpt(text: &str) -> String {
             return false;
         }
         let l = l.to_ascii_lowercase();
-        ["error", "fail", "exception", "traceback", "assert"]
-            .iter()
-            .any(|w| l.contains(w))
+        [
+            "error",
+            "fail",
+            "exception",
+            "traceback",
+            "assert",
+            "does not exist",
+            "no such",
+        ]
+        .iter()
+        .any(|w| l.contains(w))
     };
     let tail_from = lines.len().saturating_sub(5);
     let mut keep: Vec<&str> = lines[..tail_from]
@@ -572,6 +599,19 @@ mod tests {
             "{got}"
         );
         assert!(!got.contains('\u{2713}'), "{got}");
+    }
+
+    #[test]
+    fn a_missing_column_line_counts_as_a_failure() {
+        // Prisma's wording carries none of the usual failure words.
+        let mut out =
+            String::from("The column `users.legacy` does not exist in the current database.\n");
+        out.push_str(&"noise\n".repeat(20));
+        assert!(
+            excerpt(&out).contains("does not exist"),
+            "{}",
+            excerpt(&out)
+        );
     }
 
     #[test]

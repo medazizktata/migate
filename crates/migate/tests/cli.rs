@@ -1774,3 +1774,21 @@ print(con.execute("SELECT id, email, legacy FROM users").fetchall())
     assert_eq!(code, 2, "{out}{err}");
     assert!(out.contains("error   MG503"), "{out}");
 }
+
+#[test]
+fn a_migration_that_fails_on_the_rows_present_says_which_rows() {
+    // Rows production holds already collide: the new UNIQUE index fails on them, not on its own SQL, and the message
+    // must say so.
+    let r = sandbox_repo_full(
+        SANDBOX_TOML,
+        OLD_APP,
+        &format!("{INIT}\nINSERT INTO users (email) VALUES ('dup@b.c'), ('dup@b.c');"),
+        "CREATE UNIQUE INDEX users_email ON users (email);",
+    );
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG803") && out.contains("main.users ("),
+        "{out}"
+    );
+}

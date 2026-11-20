@@ -4,8 +4,9 @@
 live against the database your new migrations produce, and stops the release if the old app would break.** It works with
 the migration tool, database and hosting you already use.
 
-Status (2026-11-19): partly built, not released. Built and tested on SQLite: the migration record and order checks, the
-throwaway-database run, the old app's tests against the new schema, the schema comparison and lost-row counts. Each
+Status (2026-11-20): partly built, not released. Built and tested on SQLite and PostgreSQL: the migration record and
+order checks, the throwaway-database run, the old app's tests against the new schema, the schema comparison (with
+changes it cannot model named as not checked), and lost-row and lost-value counts. Each
 capability below is marked **built** or **planned**; "Where it stands" at the end has the detail.
 
 ## The problem
