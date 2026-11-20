@@ -93,12 +93,11 @@ pub fn run(
             dir.join("sandbox.db"),
             cfg.database.as_deref().or(tool_location).map(in_dir),
         )),
-        Engine::Postgres => Box::new(migate_engine_postgres::Server::start(&dir)?),
+        // The server is stopped with the run's commands if the run is interrupted, even while it starts.
+        Engine::Postgres => Box::new(migate_engine_postgres::Server::start(&dir, &mut |group| {
+            live().groups.push(group);
+        })?),
     };
-    // A server the sandbox runs is stopped with the run's commands if the run is interrupted.
-    if let Some(group) = sandbox.process_group() {
-        live().groups.push(group);
-    }
     let placeholders = sandbox.placeholders();
     let vars = |s: &str| {
         let mut s = in_dir(s).replace("{database}", &name);

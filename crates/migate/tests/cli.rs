@@ -1573,3 +1573,104 @@ fn postgres_settings_in_the_callers_environment_do_not_reach_the_server() {
     );
     assert_eq!(code, 0, "{out}{err}");
 }
+
+/// A bin folder with the real initdb and psql and a stand-in `postgres` script, for start-up failures on demand.
+fn fake_pg_bin(dir: &std::path::Path, postgres: &str) -> std::path::PathBuf {
+    let real = [
+        "/opt/homebrew/opt/postgresql@18/bin",
+        "/usr/local/opt/postgresql@18/bin",
+    ]
+    .into_iter()
+    .map(std::path::PathBuf::from)
+    .chain(
+        fs::read_dir("/usr/lib/postgresql")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path().join("bin")),
+    )
+    .find(|d| d.join("initdb").is_file())
+    .expect("PostgreSQL server programs");
+    let bin = dir.join("fake-pg-bin");
+    fs::create_dir_all(&bin).unwrap();
+    for tool in ["initdb", "psql"] {
+        std::os::unix::fs::symlink(real.join(tool), bin.join(tool)).unwrap();
+    }
+    fs::write(bin.join("postgres"), format!("#!/bin/sh\n{postgres}\n")).unwrap();
+    Command::new("chmod")
+        .args(["+x", &bin.join("postgres").to_string_lossy()])
+        .status()
+        .unwrap();
+    bin
+}
+
+#[test]
+fn a_postgres_that_dies_at_start_fails_the_run_at_once_with_its_own_error() {
+    let r = pg_repo("select 1;");
+    let bin = fake_pg_bin(
+        &r.dir,
+        "echo 'FATAL: the stand-in server refused to start' >&2; exit 1",
+    );
+    let started = std::time::Instant::now();
+    let (code, _, err) = sandbox_check(&r, &[("MIGATE_PG_BIN", &*bin.to_string_lossy())]);
+    assert_eq!(code, 3, "{err}");
+    assert!(
+        err.contains("the stand-in server refused to start"),
+        "{err}"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn an_interrupt_while_the_server_starts_stops_it() {
+    let r = pg_repo("select 1;");
+    let pid_file = r.dir.join("server.pid");
+    let bin = fake_pg_bin(
+        &r.dir,
+        &format!("echo $$ > {}\nexec sleep 60", pid_file.display()),
+    );
+    let child = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .arg("check")
+        .env("MIGATE_PG_BIN", &bin)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    for _ in 0..400 {
+        if fs::read_to_string(&pid_file).is_ok_and(|p| !p.trim().is_empty()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    let server = fs::read_to_string(&pid_file).unwrap().trim().to_string();
+    std::thread::sleep(std::time::Duration::from_millis(300)); // migate is now waiting for it to accept connections
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let alive = Command::new("kill")
+        .args(["-0", &server])
+        .status()
+        .unwrap()
+        .success();
+    if alive {
+        let _ = Command::new("kill").args(["-KILL", &server]).status();
+    }
+    assert!(!alive, "the starting server outlived the interrupt");
+}

@@ -48,8 +48,9 @@ pub struct Server {
 }
 
 impl Server {
-    /// `initdb` a cluster under `dir`, start it, create the `migate` database.
-    pub fn start(dir: &Path) -> Result<Server, String> {
+    /// `initdb` a cluster under `dir`, start it, create the `migate` database. `spawned` gets the server's process
+    /// group as soon as it exists, before the wait for connections, so an interrupt during start-up can stop it.
+    pub fn start(dir: &Path, spawned: &mut dyn FnMut(u32)) -> Result<Server, String> {
         let bin = bindir()?;
         let data = dir.join("pgdata");
         let out = Command::new(bin.join("initdb"))
@@ -75,6 +76,9 @@ impl Server {
             ));
         }
         let port = free_port()?;
+        let log_path = dir.join("postgres.log");
+        let log =
+            std::fs::File::create(&log_path).map_err(|e| format!("{}: {e}", log_path.display()))?;
         let child = Command::new(bin.join("postgres"))
             .env_clear()
             // macOS refuses to start a postmaster with no locale set ("became multithreaded during startup").
@@ -96,11 +100,12 @@ impl Server {
             .process_group(0)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(log)
             .spawn()
             .map_err(|e| format!("cannot start postgres: {e}"))?;
+        spawned(child.id());
         let admin = format!("postgresql://{USER}@127.0.0.1:{port}/postgres");
-        let server = Server {
+        let mut server = Server {
             url: format!("postgresql://{USER}@127.0.0.1:{port}/{DATABASE}"),
             bin,
             child,
@@ -110,6 +115,15 @@ impl Server {
             if psql(&server.bin, &admin, "select 1").is_ok() {
                 break;
             }
+            // A server that died (a busy port, a bad setting) will not come back: say why now, not in 30 s.
+            if let Ok(Some(status)) = server.child.try_wait() {
+                let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+                let tail: Vec<&str> = log.lines().rev().take(5).collect();
+                return Err(format!(
+                    "the throwaway postgres exited at start ({status}):\n{}",
+                    tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+                ));
+            }
             if Instant::now() > deadline {
                 return Err("the throwaway postgres did not accept connections within 30 s".into());
             }
@@ -117,6 +131,11 @@ impl Server {
         }
         psql(&server.bin, &admin, &format!("create database {DATABASE}"))?;
         Ok(server)
+    }
+
+    /// The server's process id (also its process group).
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
 
     pub fn url(&self) -> &str {
@@ -194,10 +213,6 @@ pub fn stop_left_server(dir: &Path) {
 impl engine::Sandbox for Server {
     fn placeholders(&self) -> Vec<(&'static str, String)> {
         vec![("url", self.url.clone())]
-    }
-
-    fn process_group(&self) -> Option<u32> {
-        Some(self.child.id())
     }
 
     fn open(&self, _history: &str) -> Result<Box<dyn engine::Database + '_>, String> {

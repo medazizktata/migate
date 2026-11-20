@@ -97,7 +97,7 @@ fn col(s: &Snapshot, table: &str, name: &str) -> migate_core::schema::Column {
 #[test]
 fn every_kind_is_read_from_a_real_server() {
     let dir = Dir::new();
-    let server = Server::start(&dir.0).unwrap();
+    let server = Server::start(&dir.0, &mut |_| {}).unwrap();
     psql(&server, SCHEMA);
     let s = server.snapshot().unwrap();
     assert_eq!(s.engine(), "postgres");
@@ -251,7 +251,7 @@ fn every_kind_is_read_from_a_real_server() {
 #[test]
 fn the_database_port_counts_and_empties_a_real_server() {
     let dir = Dir::new();
-    let server = Server::start(&dir.0).unwrap();
+    let server = Server::start(&dir.0, &mut |_| {}).unwrap();
     psql(
         &server,
         "create table history (name text); insert into history values ('0001'), ('0002');
@@ -282,8 +282,8 @@ fn the_database_port_counts_and_empties_a_real_server() {
 #[test]
 fn a_dropped_server_is_gone() {
     let dir = Dir::new();
-    let server = Server::start(&dir.0).unwrap();
-    let pid = server.process_group().unwrap();
+    let server = Server::start(&dir.0, &mut |_| {}).unwrap();
+    let pid = server.pid();
     drop(server);
     let alive = Command::new("kill")
         .args(["-0", &pid.to_string()])

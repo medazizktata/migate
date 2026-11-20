@@ -10,11 +10,6 @@ pub trait Sandbox {
     /// Placeholders the project's commands may use, by name: `db` for a database file, `url` for a server.
     fn placeholders(&self) -> Vec<(&'static str, String)>;
 
-    /// The process group of a server the sandbox runs, for an interrupted run to stop.
-    fn process_group(&self) -> Option<u32> {
-        None
-    }
-
     /// The database the migrate command wrote, or why there is none (it most likely wrote somewhere else). `history`
     /// is the migrator's history query, for engines that must pick the database among several candidates.
     fn open(&self, history: &str) -> Result<Box<dyn Database + '_>, String>;
