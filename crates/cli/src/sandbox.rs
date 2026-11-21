@@ -18,13 +18,13 @@ use signal_hook::iterator::Signals;
 
 use migate_core::contract;
 use migate_core::diff::{Change, classify_with, diff};
-use migate_core::engine::{self, Database, TriggerProbe};
+use migate_core::engine::{Database, TriggerProbe};
 use migate_core::schema::{Kind, Snapshot};
 use migate_core::{Finding, Severity};
 use migate_migrators::Migrator;
 
 use crate::config::{Engine, Sandbox};
-use crate::project;
+use crate::{engines, project};
 use migate_migrators::tools;
 
 /// Variables passed from migate's own environment without being asked for: the operating system's. A toolchain's
@@ -63,24 +63,18 @@ pub fn run(
         .as_deref()
         .filter(|_| cfg.migrate.is_none());
     let in_dir = |s: &str| s.replace("{dir}", &dir.to_string_lossy());
-    let sandbox: Box<dyn engine::Sandbox> = match cfg.engine {
-        Engine::Sqlite => Box::new(migate_engine_sqlite::Throwaway::new(
-            dir.join("sandbox.db"),
-            cfg.database.as_deref().or(tool_location).map(in_dir),
-        )),
-        // Started and recorded under the lock, as `sh` does: an interrupt either stops it or comes before it starts.
-        Engine::Postgres => Box::new(migate_engine_postgres::Server::start(
-            &dir,
-            cfg.target_version.as_deref(),
-            &tools().postgres_bin_dirs,
-            &mut |command| {
-                let mut l = live();
-                let child = command.spawn()?;
-                l.servers.push(child.id());
-                Ok(child)
-            },
-        )?),
-    };
+    // A server is started and recorded under the lock, as `sh` does: an interrupt either stops it or comes first.
+    let sandbox = engines::start(
+        cfg,
+        &dir,
+        cfg.database.as_deref().or(tool_location).map(in_dir),
+        &mut |command| {
+            let mut l = live();
+            let child = command.spawn()?;
+            l.servers.push(child.id());
+            Ok(child)
+        },
+    )?;
     let placeholders = sandbox.placeholders();
     let vars = |s: &str| {
         let mut s = in_dir(s).replace("{database}", &name);
@@ -1042,8 +1036,7 @@ fn sweep(root: &Path, own: &Path) {
             .status()
             .is_ok_and(|s| s.success());
         if mine && pid != me && !alive {
-            // A Postgres the killed run started outlives it; stop it before its folder goes.
-            migate_engine_postgres::stop_left_server(&entry.path().join("db"));
+            engines::stop_left_behind(&entry.path().join("db"));
             let _ = std::fs::remove_dir_all(entry.path());
         }
     }

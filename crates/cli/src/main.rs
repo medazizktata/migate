@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 
 mod check;
 mod config;
+mod engines;
 mod git;
 mod ledger_file;
 mod output;
