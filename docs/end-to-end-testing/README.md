@@ -43,5 +43,5 @@ One document per run, named by its date.
 - A real PostgreSQL project with real history (only minimal sample apps so far).
 - MG002, MG003, MG007 end to end, MG105 by a table rebuild, MG801 and MG805, and a project's own contract-marker
   convention.
-- SQL inside TypeScript, Python or Ruby migrations, for the syntax-version check (MG701): reported as not checked
-  (MG801) since TASK-78.
+- One-off statements (`ALTER TABLE ... DROP COLUMN` and the like) inside TypeScript, Python or Ruby migrations, for the
+  syntax-version check (MG701): reported as not checked (MG801). What such migrations leave in the schema is checked.

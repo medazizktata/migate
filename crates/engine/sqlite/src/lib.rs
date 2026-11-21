@@ -158,6 +158,18 @@ pub fn unmodelled(path: &Path) -> Result<BTreeMap<String, String>, Error> {
     Ok(found)
 }
 
+/// Every schema object's stored definition in the database at `path`, `type main.name` -> its SQL, SQLite's own
+/// objects left out.
+pub fn schema_sql(path: &Path) -> Result<BTreeMap<String, String>, Error> {
+    check_file(path)?;
+    let copy = copy_of(&[("main", path)])?;
+    let found = copy
+        .prepare("SELECT type, name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'")?
+        .query_map([], |r| Ok((format!("{} main.{}", r.get::<_, String>(0)?, r.get::<_, String>(1)?), r.get::<_, String>(2)?)))?
+        .collect::<Result<_, _>>()?;
+    Ok(found)
+}
+
 /// Every column's count of non-NULL values in the database at `path`, by `main.table.column`.
 pub fn value_counts(path: &Path) -> Result<BTreeMap<String, u64>, Error> {
     check_file(path)?;
@@ -854,6 +866,9 @@ impl engine::Database for File {
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
         unmodelled(&self.0).map_err(|e| e.0)
     }
+    fn schema_sql(&self) -> Result<BTreeMap<String, String>, String> {
+        schema_sql(&self.0).map_err(|e| e.0)
+    }
     fn newer_writer(&self) -> Option<String> {
         newer_writer(&self.0)
     }
@@ -869,7 +884,7 @@ impl engine::Database for File {
                 "sandbox",
                 format!(
                     "the migrations ran on SQLite {}, production runs {target}: syntax newer than production's is \
-                     checked in SQL migration files (MG701), but behaviour that differs between the two versions was not run",
+                     checked (MG701: SQL migration files, and the schema other migrations leave), but behaviour that differs between the two versions was not run",
                     features::dotted(w)
                 ),
             )

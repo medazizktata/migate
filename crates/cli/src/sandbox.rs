@@ -167,10 +167,10 @@ pub fn run(
         .filter(|f| !at_base.contains(&f.path))
         .map(|f| (f.path, String::from_utf8_lossy(&f.bytes).into_owned()))
         .collect();
-    // Syntax production's engine version lacks, in the SQL migrations this change adds. Only SQL files can be read
-    // this way; any other migration, on an engine that reads rather than runs production's version, is said to be
-    // unchecked instead of passing silently.
-    let mut too_new = Vec::new();
+    // Syntax production's engine version lacks, in the SQL migrations this change adds. Any other migration, on an
+    // engine that reads rather than runs production's version, is checked through the schema it leaves (below), and
+    // what that cannot see is said to be unchecked instead of passing silently.
+    let (mut too_new, mut unread) = (Vec::new(), false);
     if let Some(target) = &cfg.target_version {
         for (path, text) in &added {
             if !path.ends_with(".sql") {
@@ -181,12 +181,14 @@ pub fn run(
                             Severity::Warning,
                             "target_version",
                             format!(
-                                "not a SQL file, so its statements were not checked for syntax newer than \
-                                 production's {target} (MG701 reads SQL migration files only)"
+                                "not a SQL file, so only the schema it leaves was checked for syntax newer than \
+                                 production's {target} (MG701); a statement that leaves no trace in the schema, \
+                                 such as ALTER TABLE ... DROP COLUMN, was not"
                             ),
                         )
                         .at(path.clone(), 0),
                     );
+                    unread = true;
                 }
                 continue;
             }
@@ -302,6 +304,11 @@ pub fn run(
     let rows_before = project_keys(db.row_counts()?);
     let unmodelled_before = db.unmodelled()?;
     let values_before = project_keys(db.value_counts()?);
+    let schema_before = if unread {
+        db.schema_sql()?
+    } else {
+        BTreeMap::new()
+    };
 
     eprintln!("migate: migrating it to HEAD");
     let out = kept.save("head-migrate", sh(&migrate, &head_dir, &migrate_env)?)?;
@@ -313,6 +320,27 @@ pub fn run(
         None => None,
     };
     let mut findings = too_new;
+    // The definitions the head migrations added or changed, as the engine stores them: what a migration that is not
+    // a SQL file wrote, whatever language built it.
+    if let (true, Some(target)) = (unread, &cfg.target_version) {
+        for (key, sql) in db.schema_sql()? {
+            if schema_before.get(&key) == Some(&sql) {
+                continue;
+            }
+            let (kind, object) = key.split_once(' ').unwrap_or(("object", key.as_str()));
+            for (_, feature, since) in sandbox.newer_syntax(&sql, target)?.unwrap_or_default() {
+                findings.push(Finding::new(
+                    "MG701",
+                    Severity::Error,
+                    object.to_string(),
+                    format!(
+                        "{feature} in the {kind} this change leaves: needs version {since}; production runs {target} \
+                         (target_version), so it fails at deploy"
+                    ),
+                ));
+            }
+        }
+    }
     findings.extend(target_gap);
     if let Some(why) = newer_writer {
         findings.push(Finding::new(

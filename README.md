@@ -142,9 +142,10 @@ as not checked (MG801): only the base version's tests judged it.
 
 Production may run an older engine than the sandbox. Set `target_version` under `[sandbox]` (`"3.37.2"` for SQLite,
 `"15"` for PostgreSQL): a SQL migration using syntax that version lacks is an error (MG701), PostgreSQL runs on that
-major when it is installed, and the run says what it could not check on production's version (MG806). On SQLite only
-SQL migration files can be read this way; a migration in another language (TypeScript, Python, Ruby) is reported as
-not checked (MG801), not passed.
+major when it is installed, and the run says what it could not check on production's version (MG806). On SQLite, a
+migration in another language (TypeScript, Python, Ruby) is checked through the schema it leaves: a table, view, index
+or trigger it creates or changes. A statement that leaves no trace there, such as `ALTER TABLE ... DROP COLUMN`, is
+reported as not checked (MG801), not passed.
 
 Cloudflare D1 neither publishes its SQLite version nor lets a query read it: `sqlite_version()` is outside its function
 allowlist. Probe a feature instead: `select 1_000` succeeds from SQLite 3.46.0 on. D1 refuses functions outside that

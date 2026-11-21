@@ -62,6 +62,10 @@ pub trait Database {
     /// Whether `trigger` on `table` would refuse any row the table holds if it were written again. Never writes to the
     /// database itself.
     fn probe_trigger(&self, table: &str, trigger: &str) -> Result<TriggerProbe, String>;
+    /// Every schema object's definition as the engine keeps it, `type name` -> its SQL text, for the syntax check on
+    /// what migrations left behind when their own files cannot be read. Empty for an engine that keeps no such text
+    /// or needs no such check.
+    fn schema_sql(&self) -> Result<BTreeMap<String, String>, String>;
     /// Every object the schema model does not cover, as `category name` -> its definition text, so a change to one is
     /// reported as not checked rather than passing in silence.
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String>;

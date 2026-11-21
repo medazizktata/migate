@@ -2080,7 +2080,7 @@ for f in sorted(pathlib.Path("migrations").glob("*.ts")):
 "#;
 
 #[test]
-fn a_non_sql_migration_is_said_to_be_unchecked_against_target_version() {
+fn a_non_sql_migration_is_checked_through_the_schema_it_leaves() {
     let config = SANDBOX_TOML
         .replace("wrangler-d1", "payload")
         .replace("apply.py", "apply_ts.py");
@@ -2100,21 +2100,48 @@ fn a_non_sql_migration_is_said_to_be_unchecked_against_target_version() {
     );
     r.commit("change");
     let (code, out, err) = sandbox_check(&r, &[]);
-    assert_eq!(code, 0, "a warning, not an error: {out}{err}");
+    assert_eq!(code, 2, "{out}{err}");
     assert!(
-        out.contains("warning MG801")
-            && out.contains("migrations/20260102_000000_notes.ts")
-            && out.contains("not checked for syntax newer than production's 3.31"),
+        out.contains("error   MG701  main.notes (migrations/20260102_000000_notes.ts:1): STRICT table in the table this change leaves")
+            && out.contains("3.37.0"),
         "{out}"
     );
     assert!(
-        !out.contains("error   MG701"),
-        "nothing read the TypeScript: {out}"
+        out.contains("warning MG801")
+            && out.contains("such as ALTER TABLE ... DROP COLUMN, was not"),
+        "what the schema cannot show is still said: {out}"
     );
     assert!(
-        out.contains("checked in SQL migration files (MG701)"),
+        out.contains("the schema other migrations leave"),
         "MG806 claims only what ran: {out}"
     );
+}
+
+#[test]
+fn only_what_a_non_sql_migration_adds_or_changes_is_scanned() {
+    // Base already holds a STRICT table (production runs it, whatever target_version says); head only adds a column.
+    let config = SANDBOX_TOML
+        .replace("wrangler-d1", "payload")
+        .replace("apply.py", "apply_ts.py");
+    let r = Repo::new();
+    r.write("migate.toml", &with_target(&config, "3.31"));
+    r.write("apply_ts.py", APPLY_TS);
+    r.write("old_app.py", OLD_APP);
+    r.write(
+        "migrations/20260101_000000_init.ts",
+        &format!("export const up = sql`{INIT} CREATE TABLE old_strict (id INTEGER) STRICT;`\n"),
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write(
+        "migrations/20260102_000000_nickname.ts",
+        "export const up = sql`ALTER TABLE users ADD COLUMN nickname TEXT;`\n",
+    );
+    r.commit("change");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!out.contains("MG701  main.old_strict"), "{out}");
+    assert!(out.contains("warning MG801"), "{out}");
 }
 
 #[test]

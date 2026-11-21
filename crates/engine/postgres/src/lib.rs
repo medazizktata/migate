@@ -377,6 +377,10 @@ impl engine::Database for Db<'_> {
         )))
     }
 
+    /// None needed: the migrations run on production's own major version.
+    fn schema_sql(&self) -> Result<BTreeMap<String, String>, String> {
+        Ok(BTreeMap::new())
+    }
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
         let mut out = BTreeMap::new();
         for r in rows(&self.0.bin, &self.0.url, &unmodelled_query())? {
