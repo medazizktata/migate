@@ -1,0 +1,45 @@
+# End-to-end testing
+
+Every run of migate on real projects so far: what was run, how its ground truth was set, what it found, and what it
+changed. The test suite and CI check migate's code; these runs check whether it gives the right verdict on a real
+project's migrations and tests.
+
+The main subject is the project migate started from, a Payload app on Cloudflare D1 (local mode), described here only
+generically. Its harness drives that private project and is kept outside this repository.
+
+## How a run is judged
+
+Each case is a base (the version still serving traffic) and a head (the change), and its truth is set without migate:
+
+- **The deploy:** does head's migration fail on the database base's tests left behind? Then migate must block.
+- **The old version:** base's own tests on that database, before (control) and after head's migration (treat). A
+  break is a test that passed in the control and not in the treat. Tests already failing in the control are ignored.
+- **Data loss:** rows and non-empty values counted directly just before and just after head's migration.
+- **By construction:** rules whose consequence cannot be seen locally (an edited migration production already ran, an
+  engine older than the local one). The case is built to break the rule, and must be checked to fail for that reason.
+- **Probes and controls:** a bad setup must give "could not check" (exit 3), and a case with no change must pass.
+
+Outcomes: caught, missed, correct pass, false alarm, and "needs a trigger marker" (a block resting only on trigger
+rules, MG503/MG504, where the tests saw nothing: by the owner's decision these stay errors until accepted with a
+`migate: contract` marker).
+
+## The runs, in order
+
+One document per run, named by its date.
+
+| # | Date | Run | Document |
+|---|---|---|---|
+| 1 | 2026-11-19 | Ledger and order checks on the origin project | `2026-11-19-ledger-and-order.md` |
+| 2 | 2026-11-19 | Test drive 1: a blind agent on five stacks | `2026-11-19-test-drive-1.md` |
+| 3 | 2026-11-19 to 20 | Dogfood 2 and the PostgreSQL drive | `2026-11-20-dogfood-2-and-postgres-drive.md` |
+| 4 | 2026-11-20 | Fix-verification drive | `2026-11-20-fix-verification.md` |
+| 5 | 2026-11-20 | Trigger-probe blind test | `2026-11-20-trigger-probe.md` |
+| 6 | 2026-11-20 | Dogfood 3 | `2026-11-20-dogfood-3.md` |
+| 7 | 2026-11-21 | Dogfood 4 | `2026-11-21-dogfood-4.md` |
+
+## Not covered yet
+
+- Prisma and Drizzle end to end (a package download), Rails on SQLite (the `sqlite3` gem).
+- A real PostgreSQL project with real history (only minimal sample apps so far).
+- MG002, MG003, MG007 end to end, MG105 by a table rebuild, MG801 and MG805, and a project's own contract-marker
+  convention.

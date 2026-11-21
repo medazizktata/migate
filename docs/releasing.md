@@ -21,7 +21,7 @@ detection.
 
 A release is for someone to use, not to exercise the pipeline. Cut one when all of these hold:
 
-- the work since the last release was tried on a real project (a dogfood run, not only the test suite), and nothing
+- the work since the last release was tried on a real project (a dogfood run, not only the test suite; every run is in `end-to-end-testing/`), and nothing
   it found that blocks a team is left open;
 - no known false alarm or missed break is left open without a task and a decision;
 - there is a binary, or an install path, for the people who will use it.

@@ -1,7 +1,7 @@
 //! Reading a project's migration files (an adapter: the core never touches the file system).
 //!
 //! The candidates are git's files (tracked, plus new ones not yet added), not a walk of the disk: an untracked folder
-//! such as a virtualenv holds migrations that a CI checkout never has (test drive 1, `docs/research/test-drive-1.md`).
+//! such as a virtualenv holds migrations that a CI checkout never has (test drive 1, `docs/end-to-end-testing/2026-11-19-test-drive-1.md`).
 
 use std::fs;
 use std::path::Path;
