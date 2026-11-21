@@ -3,10 +3,16 @@ name = "Django"
 # Files: <app>/migrations/NNNN_<name>.py; django_migrations stores (app, name). Order is the dependency graph.
 path_pattern = '(?:^|/)(?P<group>[^/]+)/migrations/(?P<id>(?P<version>\d{4}_[^/]+))\.py$'
 order = "graph"
-graph = "django"
 out_of_order = "block"
 checksum = "none"
 
+
+# A migration's parents: `dependencies = [("app", "0001_initial"), ...]`. `__first__`, `__latest__` and
+# `swappable_dependency(...)` name no concrete migration.
+[graph]
+list = 'dependencies[^\[]*\['
+parent = '''\(\s*['"](?P<group>[\w.]+)['"]\s*,\s*['"](?P<id>[\w.]+)['"]\s*\)'''
+skip = '^__'
 [history]
 kind = "full"
 # shortcut: `||` works on SQLite and Postgres, not MySQL (CONCAT); add a per-engine query when MySQL lands.

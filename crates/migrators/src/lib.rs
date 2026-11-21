@@ -39,18 +39,34 @@ enum OrderName {
     Graph,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-enum GraphKind {
-    Django,
+/// A migration's parents, read from its own file: the bracketed list `list` opens (the pattern matches up to and
+/// including the list's `[`, which ends at its matching `]`), each parent matching `parent` with named groups `group`
+/// and `id`. Ids matching `skip` name no concrete migration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GraphDef {
+    list: String,
+    parent: String,
+    skip: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-enum VersionSource {
-    #[default]
-    Path,
-    DrizzleJournal,
+#[derive(Debug, Clone)]
+struct Graph {
+    list: Regex,
+    parent: Regex,
+    skip: Option<Regex>,
+}
+
+/// Migrations listed in one JSON journal (the file `path_pattern` matches) rather than one file each: the array
+/// `entries`, each entry's `id` and `version` fields, and `file`, where each migration's code lives relative to the
+/// journal's folder (`{id}` stands for the entry's id).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Journal {
+    entries: String,
+    id: String,
+    version: String,
+    file: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -101,10 +117,9 @@ struct Def {
     id: String,
     name: String,
     path_pattern: String,
-    #[serde(default)]
-    version_source: VersionSource,
+    journal: Option<Journal>,
     order: OrderName,
-    graph: Option<GraphKind>,
+    graph: Option<GraphDef>,
     out_of_order: String,
     #[serde(default)]
     silent_skip: bool,
@@ -123,8 +138,8 @@ pub struct Migrator {
     pub history: History,
     pub migrate: Migrate,
     pattern: Regex,
-    version_source: VersionSource,
-    graph: Option<GraphKind>,
+    journal: Option<Journal>,
+    graph: Option<Graph>,
     policy: Policy,
     checksum: MigratorChecksum,
 }
@@ -139,7 +154,7 @@ impl Migrator {
             toml::from_str(text).map_err(|e| Error(format!("invalid migrator file: {e}")))?;
         let pattern = Regex::new(&d.path_pattern)
             .map_err(|e| Error(format!("{}: path_pattern: {e}", d.id)))?;
-        if d.version_source == VersionSource::Path {
+        if d.journal.is_none() {
             for group in ["id", "version"] {
                 if !pattern.capture_names().flatten().any(|n| n == group) {
                     return Err(Error(format!(
@@ -155,6 +170,28 @@ impl Migrator {
                 d.id
             )));
         }
+        let regex = |field: &str, s: &str| {
+            Regex::new(s).map_err(|e| Error(format!("{}: graph.{field}: {e}", d.id)))
+        };
+        let graph = match &d.graph {
+            Some(g) => {
+                let parent = regex("parent", &g.parent)?;
+                for group in ["group", "id"] {
+                    if !parent.capture_names().flatten().any(|n| n == group) {
+                        return Err(Error(format!(
+                            "{}: graph.parent needs a named group `{group}`",
+                            d.id
+                        )));
+                    }
+                }
+                Some(Graph {
+                    list: regex("list", &g.list)?,
+                    parent,
+                    skip: g.skip.as_deref().map(|s| regex("skip", s)).transpose()?,
+                })
+            }
+            None => None,
+        };
         let level = |field: &str, value: &str| match value {
             "block" => Ok(OutOfOrder::Block),
             "warn" => Ok(OutOfOrder::Warn),
@@ -179,8 +216,8 @@ impl Migrator {
             history: d.history,
             migrate: d.migrate,
             pattern,
-            version_source: d.version_source,
-            graph: d.graph,
+            journal: d.journal,
+            graph,
             policy: Policy {
                 model,
                 out_of_order,
@@ -223,8 +260,8 @@ impl Migrator {
             .collect())
     }
 
-    /// Like [`Migrator::migrations`], with the path of the file that holds each migration (for hashing). For stable
-    /// Drizzle that is `<folder>/<tag>.sql` next to `meta/_journal.json`.
+    /// Like [`Migrator::migrations`], with the path of the file that holds each migration (for hashing): the matched
+    /// file itself, or for a journal the file its `file` setting names.
     pub fn migration_files(
         &self,
         files: &[(String, String)],
@@ -234,22 +271,16 @@ impl Migrator {
             let Some(caps) = self.pattern.captures(path) else {
                 continue;
             };
-            match self.version_source {
-                VersionSource::DrizzleJournal => {
-                    let folder = path.strip_suffix("meta/_journal.json").unwrap_or_default();
-                    out.extend(drizzle_journal(path, text)?.into_iter().map(|m| {
-                        let file = format!("{folder}{}.sql", m.id);
-                        (m, file)
-                    }));
-                }
-                VersionSource::Path => {
+            match &self.journal {
+                Some(journal) => out.extend(journal_entries(path, text, journal)?),
+                None => {
                     let id = &caps["id"];
                     let version = &caps["version"];
                     let group = caps.name("group").map_or("", |g| g.as_str());
-                    let parents = match self.graph {
-                        Some(GraphKind::Django) => django_parents(text),
-                        None => Vec::new(),
-                    };
+                    let parents = self
+                        .graph
+                        .as_ref()
+                        .map_or_else(Vec::new, |g| graph_parents(text, g));
                     let migration = Migration {
                         id: if group.is_empty() {
                             id.to_string()
@@ -314,41 +345,64 @@ pub fn get(id: &str) -> Option<Result<Migrator, Error>> {
         .map(|(_, text)| Migrator::parse(text))
 }
 
-#[derive(Deserialize)]
-struct Journal {
-    entries: Vec<JournalEntry>,
+/// The migrations a JSON journal lists, each with the file that holds its code.
+fn journal_entries(path: &str, text: &str, j: &Journal) -> Result<Vec<(Migration, String)>, Error> {
+    let doc: serde_json::Value = serde_json::from_str(text)
+        .map_err(|e| Error(format!("{path}: not a migration journal: {e}")))?;
+    let entries = doc
+        .get(&j.entries)
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| Error(format!("{path}: no `{}` array", j.entries)))?;
+    let folder = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+    entries
+        .iter()
+        .map(|e| {
+            let field = |name: &str| match e.get(name) {
+                Some(serde_json::Value::String(s)) => Some(s.clone()),
+                Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+                _ => None,
+            };
+            let (Some(id), Some(version)) = (field(&j.id), field(&j.version)) else {
+                return Err(Error(format!(
+                    "{path}: an entry has no `{}` or no `{}`",
+                    j.id, j.version
+                )));
+            };
+            let file = tidy(&format!("{folder}/{}", j.file.replace("{id}", &id)));
+            Ok((Migration::linear(id, version), file))
+        })
+        .collect()
 }
 
-#[derive(Deserialize)]
-struct JournalEntry {
-    when: u64,
-    tag: String,
+/// `a/b/../c` as `a/c`, without a leading `/` for a path relative to the project.
+fn tidy(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            p => parts.push(p),
+        }
+    }
+    parts.join("/")
 }
 
-/// Stable Drizzle's journal: each entry's `when` is the version `__drizzle_migrations.created_at` records.
-fn drizzle_journal(path: &str, text: &str) -> Result<Vec<Migration>, Error> {
-    let j: Journal = serde_json::from_str(text)
-        .map_err(|e| Error(format!("{path}: not a Drizzle journal: {e}")))?;
-    Ok(j.entries
-        .into_iter()
-        .map(|e| Migration::linear(e.tag, e.when.to_string()))
-        .collect())
-}
-
-/// Same-app and cross-app parents from a Django migration's `dependencies = [("app", "0001_initial"), ...]`.
-/// `__first__`/`__latest__` and `swappable_dependency(...)` name no concrete migration and are skipped.
-fn django_parents(text: &str) -> Vec<String> {
-    let Some(start) = text.find("dependencies") else {
+/// A migration's parents as `group/id`, from the list its file declares.
+fn graph_parents(text: &str, g: &Graph) -> Vec<String> {
+    let Some(open) = g
+        .list
+        .find(text)
+        .map(|m| m.end())
+        .filter(|&end| text[..end].ends_with('['))
+    else {
         return Vec::new();
     };
-    let rest = &text[start..];
-    let Some(open) = rest.find('[') else {
-        return Vec::new();
-    };
-    // The list ends at its matching bracket; tuples inside use parentheses, so bracket depth is enough.
-    let mut depth = 0usize;
-    let mut end = rest.len();
-    for (i, ch) in rest[open..].char_indices() {
+    // The list ends at its matching bracket; anything nested inside it is balanced.
+    let mut depth = 1usize;
+    let mut end = text.len();
+    for (i, ch) in text[open..].char_indices() {
         match ch {
             '[' => depth += 1,
             ']' => {
@@ -361,12 +415,10 @@ fn django_parents(text: &str) -> Vec<String> {
             _ => {}
         }
     }
-    let tuple =
-        Regex::new(r#"\(\s*['"]([\w.]+)['"]\s*,\s*['"]([\w.]+)['"]\s*\)"#).expect("valid regex");
-    tuple
-        .captures_iter(&rest[open..end])
-        .filter(|c| !c[2].starts_with("__"))
-        .map(|c| format!("{}/{}", &c[1], &c[2]))
+    g.parent
+        .captures_iter(&text[open..end])
+        .filter(|c| !g.skip.as_ref().is_some_and(|s| s.is_match(&c["id"])))
+        .map(|c| format!("{}/{}", &c["group"], &c["id"]))
         .collect()
 }
 
@@ -442,9 +494,23 @@ mod tests {
         assert!(Migrator::parse(&bad_policy).is_err());
         let unknown_field = format!("{good}\nsurprise = 1\n");
         assert!(Migrator::parse(&unknown_field).is_err());
-        let graph_without_kind =
-            include_str!("../migrators/django.toml").replace("graph = \"django\"\n", "");
-        assert!(Migrator::parse(&graph_without_kind).is_err());
+        let django = include_str!("../migrators/django.toml");
+        let start = django.find("[graph]").unwrap();
+        let end = django.find("[history]").unwrap();
+        let graph_order_without_graph = format!("{}{}", &django[..start], &django[end..]);
+        assert!(
+            Migrator::parse(&graph_order_without_graph)
+                .unwrap_err()
+                .0
+                .contains("`graph` is required")
+        );
+        let parent_without_groups = django.replace("(?P<group>", "(?P<app>");
+        assert!(
+            Migrator::parse(&parent_without_groups)
+                .unwrap_err()
+                .0
+                .contains("graph.parent needs a named group `group`")
+        );
     }
 
     #[test]

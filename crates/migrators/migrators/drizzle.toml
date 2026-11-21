@@ -2,7 +2,6 @@ id = "drizzle"
 name = "Drizzle Kit (stable 0.x)"
 # Order comes from meta/_journal.json: each entry's `when` (milliseconds) is what __drizzle_migrations.created_at stores.
 path_pattern = '(?:^|/)meta/_journal\.json$'
-version_source = "drizzle-journal"
 order = "timestamp-prefix"
 # Stable Drizzle applies only migrations newer than the last created_at, so an older one is skipped forever
 # (drizzle-orm src/sqlite-core/dialect.ts; drizzle-orm#5316). Drizzle v1 allows out-of-order and needs its own file.
@@ -11,6 +10,14 @@ out_of_order = "block"
 # Drizzle stores a hash but never compares it.
 checksum = "none"
 
+
+# Migrations are listed in meta/_journal.json; each entry's `when` is the version __drizzle_migrations.created_at
+# records, and its code is <tag>.sql in the folder above meta/.
+[journal]
+entries = "entries"
+id = "tag"
+version = "when"
+file = "../{id}.sql"
 [history]
 kind = "full"
 # Postgres keeps it in the drizzle schema (drizzle.__drizzle_migrations); SQLite and D1 in the main database.
