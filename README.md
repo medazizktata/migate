@@ -39,6 +39,18 @@ This puts `migate` in `~/.cargo/bin`. Each GitHub release also carries a Linux b
 cargo build --release            # the binary is target/release/migate (or under $CARGO_TARGET_DIR)
 migate check --migrator drizzle --base origin/main
 migate ledger record <migration-id>   # after production ran it
+migate history --history-command "<cmd>"   # at release: production's history against the repo and the ledger
+```
+
+At release, before migrating, `migate history` compares what production's history table records with the repository
+and the ledger: a migration production ran that the repository lacks (MG010), one no release recorded (MG011), and one
+the ledger records that production lacks (MG012). The release job reads production with its own read-only
+credentials; migate only runs the command and reads one migration per line, and hides the credentials in any URL it
+prints. Any client that prints the migrator's history query one row per line works (`psql`, `sqlite3`, or
+`wrangler d1 execute --remote` with its JSON reduced to names); for PostgreSQL and Payload:
+
+```sh
+migate history --history-command 'psql "$PROD_URL" -XAtc "SELECT name FROM payload_migrations WHERE batch <> -1"'
 ```
 
 `migate check` always checks the migration files against the ledger and the order rules (no database needed). With a

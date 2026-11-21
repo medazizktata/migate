@@ -43,6 +43,19 @@ pub struct CheckArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct HistoryArgs {
+    #[command(flatten)]
+    pub common: Common,
+    /// A command that prints production's applied migrations, one per line, as its history table stores them (run
+    /// by the release job, with its own read-only credentials; for example `psql "$PROD_URL" -XAtc "<history query>"`)
+    #[arg(long)]
+    pub history_command: String,
+    /// Output format
+    #[arg(long, value_enum, default_value_t = Format::Text)]
+    pub format: Format,
+}
+
+#[derive(Debug, Args)]
 pub struct RecordArgs {
     #[command(flatten)]
     pub common: Common,
@@ -260,6 +273,98 @@ fn found_any(project: &project::Project, s: &Settings) -> Result<(), String> {
         s.migrator.id,
         s.root.display()
     ))
+}
+
+/// `migate history`: production's history against the repository and the ledger (MG010-MG012), at release.
+pub fn history(args: &HistoryArgs) -> Outcome {
+    match settings(&args.common, None).and_then(|s| run_history(args, &s).map(|r| (s, r))) {
+        Ok((s, (findings, files, applied))) => {
+            let cx = Context {
+                migrator: &s.migrator.id,
+                base: "production",
+                checked: applied,
+                sandbox: None,
+                not_checked: None,
+                files: &files,
+                ledger: &s.ledger,
+            };
+            emit(&output::render(args.format, &findings, &cx));
+            if findings.iter().any(|f| f.severity == Severity::Error) {
+                Outcome::Errors
+            } else {
+                Outcome::Clean
+            }
+        }
+        Err(e) => {
+            let e = redact(&e);
+            eprintln!("migate: could not check: {e}");
+            if let Some(report) = output::render_failure(args.format, &e) {
+                emit(&report);
+            }
+            Outcome::CouldNotCheck
+        }
+    }
+}
+
+type History = (Vec<Finding>, BTreeMap<String, String>, usize);
+
+fn run_history(args: &HistoryArgs, s: &Settings) -> Result<History, String> {
+    let project = project::read(&s.root, &s.migrator)?;
+    let ledger = ledger_file::read(&s.root.join(&s.ledger), s.ledger_format)?;
+    let out = std::process::Command::new("sh")
+        .args(["-c", &args.history_command])
+        .current_dir(&s.root)
+        .output()
+        .map_err(|e| format!("the history command could not start: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "the history command failed ({}):\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim_end()
+        ));
+    }
+    let applied: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect();
+    if applied.is_empty() {
+        return Err(
+            "the history command printed no migration, so production's history could not be compared (a wrong \
+             query or database reads as empty)"
+                .into(),
+        );
+    }
+    let findings = migate_core::history::compare(&applied, &project.migrations, &ledger);
+    let files = project
+        .files
+        .iter()
+        .map(|f| (f.id.clone(), f.path.clone()))
+        .collect();
+    Ok((findings, files, applied.len()))
+}
+
+/// `text` with the credentials in any URL hidden: `postgres://user:secret@host` becomes `postgres://***@host`.
+fn redact(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail
+            .find(|c: char| c == '/' || c == '?' || c.is_whitespace() || c == '"' || c == '\'')
+            .unwrap_or(tail.len());
+        match tail[..end].rfind('@') {
+            Some(at) => {
+                out.push_str("***");
+                rest = &tail[at..];
+            }
+            None => rest = tail,
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 pub fn record(args: &RecordArgs) -> Outcome {

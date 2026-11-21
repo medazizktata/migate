@@ -465,6 +465,79 @@ fn sarif_output_has_rules_results_and_stable_fingerprints() {
     );
 }
 
+/// Two Rails migrations, `recorded` in the ledger by a release; production's history table stores versions.
+fn history_repo(recorded: &[&str]) -> Repo {
+    let r = Repo::new();
+    r.write(ORDERS, "create_table :orders\n");
+    r.write(TOTAL, "add_column :orders, :total, :integer\n");
+    if !recorded.is_empty() {
+        assert!(r.record("rails", recorded).status.success());
+    }
+    r.commit("init");
+    r
+}
+
+fn history(r: &Repo, command: &str) -> (i32, String, String) {
+    let out = r.migate(&[
+        "history",
+        "--migrator",
+        "rails",
+        "--history-command",
+        command,
+    ]);
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+const BOTH: [&str; 2] = ["20260101000000_create_orders", "20260102000000_add_total"];
+const RAN_BOTH: &str = "printf '20260101000000\\n20260102000000\\n'";
+
+#[test]
+fn production_history_agreeing_with_repo_and_ledger_passes() {
+    let (code, out, err) = history(&history_repo(&BOTH), RAN_BOTH);
+    assert_eq!(code, 0, "{out}{err}");
+}
+
+#[test]
+fn each_production_history_difference_is_an_error() {
+    let ghost = "printf '20260101000000\\n20260102000000\\n20991231000000\\n'";
+    let (code, out, err) = history(&history_repo(&BOTH), ghost);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("error   MG010  20991231000000"), "{out}");
+
+    let (code, out, err) = history(&history_repo(&BOTH[..1]), RAN_BOTH);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("error   MG011  20260102000000_add_total"),
+        "{out}"
+    );
+
+    let (code, out, err) = history(&history_repo(&BOTH), "printf '20260101000000\\n'");
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("error   MG012  20260102000000_add_total"),
+        "{out}"
+    );
+}
+
+#[test]
+fn an_empty_or_failing_history_cannot_pass_and_never_prints_credentials() {
+    let r = history_repo(&BOTH);
+    let (code, out, err) = history(&r, "true");
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(err.contains("printed no migration"), "{err}");
+    let failing = "echo 'could not connect to postgres://admin:s3cret@db.example.invalid:5432/prod' >&2; exit 2";
+    let (code, out, err) = history(&r, failing);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(
+        err.contains("postgres://***@db.example.invalid:5432/prod") && !err.contains("s3cret"),
+        "{err}"
+    );
+}
+
 #[test]
 fn record_into_a_closed_pipe_still_writes_the_ledger() {
     let r = Repo::new();

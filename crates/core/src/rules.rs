@@ -72,6 +72,24 @@ pub const RULES: &[Rule] = &[
         axes: "",
     },
     Rule {
+        id: "MG010",
+        name: "applied-migration-missing-from-repo",
+        description: "Production's history records a migration the repository has no file for: it was applied from another branch, or its file was deleted. Found at release by `migate history`.",
+        axes: "",
+    },
+    Rule {
+        id: "MG011",
+        name: "applied-outside-a-release",
+        description: "Production ran a migration no release recorded in the ledger: someone migrated by hand, or a release forgot to record it. Found at release by `migate history`.",
+        axes: "",
+    },
+    Rule {
+        id: "MG012",
+        name: "recorded-but-not-applied",
+        description: "The ledger says production ran a migration its history does not hold: it was rolled back, or the ledger was written without it running. Found at release by `migate history`.",
+        axes: "",
+    },
+    Rule {
         id: "MG101",
         name: "drop-table",
         description: "A table was dropped. The running app still reads and writes it, and its rows are gone.",

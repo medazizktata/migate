@@ -49,6 +49,8 @@ enum Command {
     /// schema diff and data-loss checks (MG1xx-MG6xx), syntax production's engine lacks (MG701), the sandbox's own
     /// limits (MG8xx) and contract markers (MG901). Every rule, with its meaning, is in crates/core/src/rules.rs.
     Check(check::CheckArgs),
+    /// At release: compare production's migration history with the repository and the ledger (MG010-MG012)
+    History(check::HistoryArgs),
     /// The ledger of migrations production has run
     #[command(subcommand)]
     Ledger(LedgerCommand),
@@ -75,6 +77,7 @@ fn main() -> ExitCode {
     };
     match &cli.command {
         Command::Check(args) => check::check(args),
+        Command::History(args) => check::history(args),
         Command::Ledger(LedgerCommand::Record(args)) => check::record(args),
     }
     .into()
