@@ -237,8 +237,12 @@ impl engine::Sandbox for Server {
 
     /// None to find by reading: the migrations run on production's major when it is installed, and when it is not,
     /// [`engine::Database::target_gap`] says so.
-    fn newer_syntax(&self, _sql: &str, target: &str) -> Result<Vec<(u32, String, String)>, String> {
-        major(target).map(|_| Vec::new())
+    fn newer_syntax(
+        &self,
+        _sql: &str,
+        target: &str,
+    ) -> Result<Option<migate_core::engine::Syntax>, String> {
+        major(target).map(|_| None)
     }
 }
 

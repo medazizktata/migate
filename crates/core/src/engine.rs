@@ -16,10 +16,14 @@ pub trait Sandbox {
     fn open(&self, history: &str) -> Result<Box<dyn Database + '_>, String>;
 
     /// Syntax in a migration's `sql` that the engine version production runs (`target`, from `target_version`)
-    /// rejects: (line, feature, the first version that runs it). An engine that runs the migrations on that very
-    /// version finds none. An error when `target` names no version of this engine.
-    fn newer_syntax(&self, sql: &str, target: &str) -> Result<Vec<(u32, String, String)>, String>;
+    /// rejects: (line, feature, the first version that runs it). `None` for an engine that runs the migrations on
+    /// that very version instead of reading them, so no migration needs scanning. An error when `target` names no
+    /// version of this engine.
+    fn newer_syntax(&self, sql: &str, target: &str) -> Result<Option<Syntax>, String>;
 }
+
+/// Syntax a target engine version rejects: (line, feature, the first version that runs it).
+pub type Syntax = Vec<(u32, String, String)>;
 
 /// What re-writing the rows a table holds, each unchanged and under its own id, shows about one of its triggers.
 #[derive(Debug, Clone, PartialEq, Eq)]

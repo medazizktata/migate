@@ -169,11 +169,30 @@ pub fn run(
         .filter(|f| !at_base.contains(&f.path))
         .map(|f| (f.path, String::from_utf8_lossy(&f.bytes).into_owned()))
         .collect();
-    // Syntax production's engine version lacks, in the SQL migrations this change adds.
+    // Syntax production's engine version lacks, in the SQL migrations this change adds. Only SQL files can be read
+    // this way; any other migration, on an engine that reads rather than runs production's version, is said to be
+    // unchecked instead of passing silently.
     let mut too_new = Vec::new();
     if let Some(target) = &cfg.target_version {
-        for (path, text) in added.iter().filter(|(p, _)| p.ends_with(".sql")) {
-            for (line, feature, since) in sandbox.newer_syntax(text, target)? {
+        for (path, text) in &added {
+            if !path.ends_with(".sql") {
+                if sandbox.newer_syntax("", target)?.is_some() {
+                    too_new.push(
+                        Finding::new(
+                            "MG801",
+                            Severity::Warning,
+                            "target_version",
+                            format!(
+                                "not a SQL file, so its statements were not checked for syntax newer than \
+                                 production's {target} (MG701 reads SQL migration files only)"
+                            ),
+                        )
+                        .at(path.clone(), 0),
+                    );
+                }
+                continue;
+            }
+            for (line, feature, since) in sandbox.newer_syntax(text, target)?.unwrap_or_default() {
                 too_new.push(
                     Finding::new(
                         "MG701",

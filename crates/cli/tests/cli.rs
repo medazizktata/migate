@@ -1980,6 +1980,56 @@ fn sqlite_syntax_newer_than_production_is_an_error() {
     );
 }
 
+/// A Payload-shaped project: migrations are TypeScript files whose SQL sits in a template string; `apply_ts.py` runs
+/// it and records each migration in `payload_migrations`, as Payload does.
+const APPLY_TS: &str = r#"import os, pathlib, re, sqlite3
+con = sqlite3.connect(os.environ["D1_PATH"], isolation_level=None)
+con.execute("CREATE TABLE IF NOT EXISTS payload_migrations (id INTEGER PRIMARY KEY, name TEXT UNIQUE, batch INTEGER)")
+done = {r[0] for r in con.execute("SELECT name FROM payload_migrations")}
+for f in sorted(pathlib.Path("migrations").glob("*.ts")):
+    if f.stem not in done:
+        con.executescript(re.search(r"sql`([^`]*)`", f.read_text()).group(1))
+        con.execute("INSERT INTO payload_migrations (name, batch) VALUES (?, 1)", (f.stem,))
+"#;
+
+#[test]
+fn a_non_sql_migration_is_said_to_be_unchecked_against_target_version() {
+    let config = SANDBOX_TOML
+        .replace("wrangler-d1", "payload")
+        .replace("apply.py", "apply_ts.py");
+    let r = Repo::new();
+    r.write("migate.toml", &with_target(&config, "3.31"));
+    r.write("apply_ts.py", APPLY_TS);
+    r.write("old_app.py", OLD_APP);
+    r.write(
+        "migrations/20260101_000000_init.ts",
+        &format!("export const up = sql`{INIT}`\n"),
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write(
+        "migrations/20260102_000000_notes.ts",
+        "export const up = sql`CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT) STRICT;`\n",
+    );
+    r.commit("change");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "a warning, not an error: {out}{err}");
+    assert!(
+        out.contains("warning MG801")
+            && out.contains("migrations/20260102_000000_notes.ts")
+            && out.contains("not checked for syntax newer than production's 3.31"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("error   MG701"),
+        "nothing read the TypeScript: {out}"
+    );
+    assert!(
+        out.contains("checked in SQL migration files (MG701)"),
+        "MG806 claims only what ran: {out}"
+    );
+}
+
 #[test]
 fn sqlite_syntax_production_can_run_passes() {
     let r = sandbox_repo(

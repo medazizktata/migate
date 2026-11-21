@@ -825,12 +825,18 @@ impl engine::Sandbox for Throwaway {
         Ok(Box::new(File(path)))
     }
 
-    fn newer_syntax(&self, sql: &str, target: &str) -> Result<Vec<(u32, String, String)>, String> {
+    fn newer_syntax(
+        &self,
+        sql: &str,
+        target: &str,
+    ) -> Result<Option<migate_core::engine::Syntax>, String> {
         let target = target_number(target)?;
-        Ok(features::newer_than(sql, target)
-            .into_iter()
-            .map(|(line, feature, since)| (line, feature.to_string(), features::dotted(since)))
-            .collect())
+        Ok(Some(
+            features::newer_than(sql, target)
+                .into_iter()
+                .map(|(line, feature, since)| (line, feature.to_string(), features::dotted(since)))
+                .collect(),
+        ))
     }
 }
 
@@ -863,7 +869,7 @@ impl engine::Database for File {
                 "sandbox",
                 format!(
                     "the migrations ran on SQLite {}, production runs {target}: syntax newer than production's is \
-                     checked (MG701), but behaviour that differs between the two versions was not run",
+                     checked in SQL migration files (MG701), but behaviour that differs between the two versions was not run",
                     features::dotted(w)
                 ),
             )
