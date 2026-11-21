@@ -338,7 +338,14 @@ pub fn run(
             "SET NULL" | "SET DEFAULT" => "blanks the reference in",
             _ => continue,
         };
-        if rebuilt.contains(&parent) && !migrator.foreign_keys_off_for_rebuilds {
+        // A child the same change drops has no rows left to lose (its drop is MG101).
+        let child_stays = o.parent.as_deref().is_some_and(|child| {
+            after
+                .objects()
+                .iter()
+                .any(|t| t.kind() == Kind::Table && t.namespace == o.namespace && t.name == child)
+        });
+        if rebuilt.contains(&parent) && child_stays && !migrator.foreign_keys_off_for_rebuilds {
             let child = format!("{}.{}", o.namespace, o.parent.as_deref().unwrap_or("?"));
             findings.push(Finding::new(
                 "MG104",

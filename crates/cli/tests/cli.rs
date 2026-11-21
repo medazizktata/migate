@@ -994,6 +994,21 @@ CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES 
 }
 
 #[test]
+fn a_rebuild_whose_cascading_child_is_dropped_too_is_not_a_cascade() {
+    // Seen on a real migration: the parent recreated and its only child dropped in the same change; no child is left
+    // to lose rows (the drop itself is MG101).
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users ON DELETE CASCADE);";
+    let both = format!("DROP TABLE posts;\n{REBUILD_USERS}");
+    let r = sandbox_repo_full(SANDBOX_TOML, OLD_APP, first, &both);
+    let (_, out, err) = sandbox_check(&r, &[]);
+    assert!(
+        out.contains("MG101") && !out.contains("MG104"),
+        "{out}{err}"
+    );
+}
+
+#[test]
 fn a_rebuild_without_cascading_children_passes() {
     let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
 CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users);";
