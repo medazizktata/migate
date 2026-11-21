@@ -29,11 +29,7 @@ impl Repo {
     }
 
     fn git(&self, args: &[&str]) {
-        // A pre-commit hook exports these; they would point the test's git at the hook's repository.
-        let status = Command::new("git")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_INDEX_FILE")
-            .env_remove("GIT_WORK_TREE")
+        let status = git_cmd()
             .arg("-C")
             .arg(&self.dir)
             .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
@@ -298,7 +294,7 @@ fn an_unreadable_base_is_exit_3_in_a_shallow_clone() {
     ));
     let _ = fs::remove_dir_all(&clone);
     let url = format!("file://{}", r.dir.display());
-    let ok = Command::new("git")
+    let ok = git_cmd()
         .args([
             "clone",
             "-q",
@@ -668,7 +664,7 @@ fn sandbox_leaves_no_worktree_behind() {
     let r = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
     let (code, out, err) = sandbox_check(&r, &[]);
     assert_eq!(code, 0, "{out}{err}");
-    let list = Command::new("git")
+    let list = git_cmd()
         .arg("-C")
         .arg(&r.dir)
         .args(["worktree", "list", "--porcelain"])
@@ -898,8 +894,26 @@ fn a_contract_without_a_reason_or_matching_nothing_fails() {
     }
 }
 
+/// git without the variables a hook exports (the same list as `src/git.rs`): under `git commit -a` they point at the
+/// hook's repository and its temporary index, so a test's clone or add would write into it.
+fn git_cmd() -> Command {
+    let mut cmd = Command::new("git");
+    for v in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_PREFIX",
+    ] {
+        cmd.env_remove(v);
+    }
+    cmd
+}
+
 fn worktrees(r: &Repo) -> usize {
-    let list = Command::new("git")
+    let list = git_cmd()
         .arg("-C")
         .arg(&r.dir)
         .args(["worktree", "list", "--porcelain"])
