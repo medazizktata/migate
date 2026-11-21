@@ -43,6 +43,10 @@ pub fn run(
 ) -> Result<(Vec<Finding>, String), String> {
     on_signals();
     let tmp = TempDir::create()?;
+    // Which repository this run's worktrees belong to, for a later run's sweep should this one be killed.
+    // Absolute: the root is often `.`, which a later run elsewhere would read as its own repository.
+    let repo = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let _ = std::fs::write(tmp.0.join("repo"), repo.as_os_str().as_encoded_bytes());
     sweep(root, &tmp.0);
     let dir = tmp.0.join("db");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -1011,7 +1015,9 @@ fn remove_worktree(root: &Path, dir: &Path) {
 }
 
 /// Remove what runs killed outright left behind (SIGKILL, a crash, power loss): this user's run folders whose process
-/// is gone, then this repository's records of worktrees that no longer exist.
+/// is gone, then the records of worktrees that no longer exist, in this repository and in each dead run's own. A dead
+/// folder is renamed aside first (instant, and its worktrees count as gone), then emptied on a background thread, so
+/// a large one does not hold up this run; one left half-done is taken by the next sweep.
 fn sweep(root: &Path, own: &Path) {
     let Ok(uid) = std::fs::metadata(own).map(|m| m.uid()) else {
         return;
@@ -1020,8 +1026,16 @@ fn sweep(root: &Path, own: &Path) {
     let Some(runs) = own.parent() else {
         return;
     };
+    let (mut trash, mut repos) = (Vec::new(), BTreeSet::from([root.to_path_buf()]));
     for entry in std::fs::read_dir(runs).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
+        let mine = entry.metadata().is_ok_and(|m| m.uid() == uid);
+        if name.starts_with("gone-") {
+            if mine {
+                trash.push(entry.path());
+            }
+            continue;
+        }
         let Some(pid) = name
             .strip_prefix("run-")
             .and_then(|rest| rest.split('-').next())
@@ -1029,7 +1043,6 @@ fn sweep(root: &Path, own: &Path) {
         else {
             continue;
         };
-        let mine = entry.metadata().is_ok_and(|m| m.uid() == uid);
         let alive = Command::new("kill")
             .args(["-0", &pid.to_string()])
             .stderr(Stdio::null())
@@ -1037,10 +1050,25 @@ fn sweep(root: &Path, own: &Path) {
             .is_ok_and(|s| s.success());
         if mine && pid != me && !alive {
             engines::stop_left_behind(&entry.path().join("db"));
-            let _ = std::fs::remove_dir_all(entry.path());
+            if let Ok(repo) = std::fs::read(entry.path().join("repo")) {
+                repos.insert(PathBuf::from(String::from_utf8_lossy(&repo).into_owned()));
+            }
+            let gone = runs.join(format!("gone-{name}"));
+            trash.push(if std::fs::rename(entry.path(), &gone).is_ok() {
+                gone
+            } else {
+                entry.path()
+            });
         }
     }
-    let _ = git(root, &["worktree", "prune"]);
+    for repo in &repos {
+        let _ = git(repo, &["worktree", "prune"]);
+    }
+    std::thread::spawn(move || {
+        for dir in trash {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    });
 }
 
 /// A detached worktree at `rev`, removed on drop.

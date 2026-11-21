@@ -1023,6 +1023,43 @@ fn a_run_cleans_up_what_a_killed_run_left_behind() {
 }
 
 #[test]
+fn a_killed_runs_worktree_records_are_pruned_in_its_own_repository() {
+    // Two repositories, one temp folder: a run in `a` is killed while its tests run; the next run is in `b`.
+    let slow = SANDBOX_TOML.replace("test = \"python3 old_app.py\"", "test = \"sleep 30\"");
+    let a = sandbox_repo(&slow, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let b = sandbox_repo(SANDBOX_TOML, "ALTER TABLE users ADD COLUMN nickname TEXT;");
+    let own_tmp = std::env::temp_dir().join(format!("migate-prune-test-{}", std::process::id()));
+    fs::create_dir_all(&own_tmp).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&a.dir)
+        .args(["check"])
+        .env("TMPDIR", &own_tmp)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    for _ in 0..400 {
+        if worktrees(&a) >= 2 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    child.kill().unwrap(); // SIGKILL: no handler runs
+    child.wait().unwrap();
+    assert!(
+        worktrees(&a) >= 2,
+        "a killed run leaves its worktrees registered (the precondition)"
+    );
+    let (code, out, err) = sandbox_check(&b, &[("TMPDIR", &*own_tmp.to_string_lossy())]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        worktrees(&a),
+        1,
+        "the killed run's worktree records are still in its repository"
+    );
+}
+
+#[test]
 fn sandbox_finds_the_database_among_files_the_tool_writes() {
     // Like Wrangler's --persist-to folder: the database under a name migate cannot know, and a metadata.sqlite beside it.
     let config = SANDBOX_TOML
