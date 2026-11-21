@@ -16,8 +16,21 @@ fn records(value: &str, m: &Migration) -> bool {
 /// Every difference between what production ran (`applied`, as its history table stores it), the repository's
 /// migrations and the ledger the releases wrote.
 pub fn compare(applied: &[String], repo: &[Migration], ledger: &Ledger) -> Vec<Finding> {
+    // A graph migrator records third-party apps' migrations too (Django's auth, admin...); the project ships none of
+    // their files, so only the groups it ships are compared.
+    let groups: std::collections::BTreeSet<&str> = repo
+        .iter()
+        .map(|m| m.group.as_str())
+        .filter(|g| !g.is_empty())
+        .collect();
+    let shipped = |value: &str| {
+        groups.is_empty()
+            || value
+                .split_once('/')
+                .is_none_or(|(group, _)| groups.contains(group))
+    };
     let mut out = Vec::new();
-    for value in applied {
+    for value in applied.iter().filter(|v| shipped(v)) {
         match repo.iter().find(|m| records(value, m)) {
             None => out.push(Finding::new(
                 "MG010",
@@ -119,9 +132,20 @@ mod tests {
         };
         let f = compare(
             &["shop/0001_initial".to_string()],
-            &[m],
+            std::slice::from_ref(&m),
             &ledger(&["shop.0001_initial"]),
         );
         assert!(f.is_empty(), "{f:?}");
+        // Django's own apps (auth, admin...) record their migrations too; the project ships none of their files.
+        let f = compare(
+            &[
+                "auth/0001_initial".to_string(),
+                "shop/0001_initial".to_string(),
+                "shop/0002_gone".to_string(),
+            ],
+            &[m],
+            &ledger(&["shop.0001_initial"]),
+        );
+        assert_eq!(rules(&f), [("MG010", "shop/0002_gone")]);
     }
 }
