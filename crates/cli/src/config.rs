@@ -15,6 +15,7 @@
 //! setup = "pnpm install --frozen-lockfile"     # run in each checkout first (a fresh checkout has no dependencies)
 //! seed = "pnpm run seed"                       # optional: rows for the data-loss check
 //! test = "pnpm test"                           # the base version's tests, run against the migrated database
+//! readback = "pnpm run readback"               # optional: the base version reads every row the head version wrote
 //! target_version = "3.37.2"                     # optional: production's engine version (SQLite 3.37.2, PostgreSQL 15)
 //! keep_output = "migate-output"                 # optional: every command's full output, one file per step
 //! ```
@@ -84,6 +85,10 @@ pub struct Sandbox {
     /// nothing), at head (the check), and after a pass, on the same throwaway database with every table but the migration
     /// history dropped (they must fail, or they never used the database).
     pub test: Option<String>,
+    /// Rollback compatibility: run in the base checkout after the head version's tests wrote rows to the migrated
+    /// database, it reads every row with the base version's code (Django's `full_clean()` on each, a Rails runner
+    /// loading each model) and fails on one it cannot read (MG812).
+    pub readback: Option<String>,
     /// The engine version production runs (`3.37.2` for SQLite, `15` for PostgreSQL), when it differs from the
     /// sandbox's: syntax production lacks is an error (MG701), and PostgreSQL runs on that major when installed.
     pub target_version: Option<String>,

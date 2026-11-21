@@ -480,6 +480,37 @@ pub fn run(
                      database instead of using the migrated one"
                     )));
                 }
+                // Rollback compatibility: rows the new version writes, read by the old one (CircleCI 2021).
+                if let Some(readback) = &cfg.readback {
+                    let rows = db.row_counts()?;
+                    eprintln!(
+                        "migate: writing rows with the head version's tests, then reading them with the base version"
+                    );
+                    kept.save("head-version-test", sh(&vars(test), &head_dir, &env)?)?;
+                    let wrote = db.row_counts()? != rows;
+                    let out = kept.save("readback", sh(&vars(readback), &base_dir, &env)?)?;
+                    if !out.status.success() {
+                        findings.push(Finding::new(
+                            "MG812",
+                            Severity::Error,
+                            "readback",
+                            format!(
+                                "the version at {base} cannot read rows the new version wrote; a rollback, or both \
+                                 versions serving at once, meets them:\n{}",
+                                tail(&out)
+                            ),
+                        ));
+                    } else if !wrote {
+                        findings.push(Finding::new(
+                            "MG812",
+                            Severity::Note,
+                            "readback",
+                            "not checked: the head version's tests left no rows to read back (a suite that deletes \
+                             its own rows writes none)"
+                                .to_string(),
+                        ));
+                    }
+                }
                 db.drop_all_but(history)?;
                 eprintln!("migate: checking the tests notice a database with its tables dropped");
                 if kept

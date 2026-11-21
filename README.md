@@ -55,6 +55,8 @@ setup = "pnpm install --frozen-lockfile"   # run in each checkout first
 seed = "pnpm run seed"                 # optional: rows, so a migration that loses rows or values is caught
 test = "pnpm test"                     # the base version's tests: run on base's own database, at head, and on an
                                        # emptied copy, so a run that never used the database is "not checked"
+readback = "pnpm run readback"         # optional: the base version reads every row the head version's tests wrote,
+                                       # as after a rollback (MG812); load each row with the old code's models
 ```
 
 The old version's tests are the primary check, and the schema rules still decide on their own: passing tests do not

@@ -840,6 +840,64 @@ ALTER TABLE users_new RENAME TO users;";
     );
 }
 
+/// A shop whose head version writes order statuses through its tests: `wrote` is the status head writes (`archived`
+/// is one base has never heard of); base's readback loads every order and refuses a status it does not know.
+fn rollback_repo(wrote: Option<&str>) -> Repo {
+    let app = |status: Option<&str>| match status {
+        Some(s) => format!(
+            "import os, sqlite3\nc = sqlite3.connect(os.environ[\"D1_PATH\"])\nc.execute(\"INSERT INTO orders (status) VALUES ('{s}')\")\nc.commit()\n"
+        ),
+        None => "pass\n".to_string(),
+    };
+    let r = Repo::new();
+    r.write(
+        "migate.toml",
+        &SANDBOX_TOML.replace("test = ", "readback = \"python3 readback.py\"\ntest = "),
+    );
+    r.write("apply.py", APPLY);
+    r.write("old_app.py", &app(Some("open")));
+    r.write(
+        "readback.py",
+        "import os, sqlite3, sys\nfor (s,) in sqlite3.connect(os.environ[\"D1_PATH\"]).execute(\"SELECT status FROM orders\"):\n    if s not in (\"open\", \"closed\"):\n        sys.exit(f\"unknown status {s!r}\")\n",
+    );
+    r.write(
+        "migrations/0001_init.sql",
+        "CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT NOT NULL);",
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write(
+        "migrations/0002_change.sql",
+        "ALTER TABLE orders ADD COLUMN note TEXT;",
+    );
+    r.write("old_app.py", &app(wrote));
+    r.commit("change");
+    r
+}
+
+#[test]
+fn rows_the_new_version_writes_that_the_old_cannot_read_are_an_error() {
+    let (code, out, err) = sandbox_check(&rollback_repo(Some("archived")), &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("error   MG812") && out.contains("unknown status 'archived'"),
+        "{out}"
+    );
+}
+
+#[test]
+fn rows_the_old_version_reads_pass_and_no_rows_is_said() {
+    let (code, out, err) = sandbox_check(&rollback_repo(Some("closed")), &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!out.contains("MG812"), "{out}");
+    let (code, out, err) = sandbox_check(&rollback_repo(None), &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("note    MG812") && out.contains("left no rows to read back"),
+        "{out}"
+    );
+}
+
 const REBUILD_USERS: &str =
     "CREATE TABLE users_new (id INTEGER PRIMARY KEY, email TEXT, legacy TEXT);
 INSERT INTO users_new SELECT id, email, legacy FROM users;

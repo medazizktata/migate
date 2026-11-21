@@ -264,6 +264,12 @@ pub const RULES: &[Rule] = &[
         axes: "",
     },
     Rule {
+        id: "MG812",
+        name: "rollback-incompatible-rows",
+        description: "The base version cannot read rows the head version wrote: after a rollback, or while both versions serve traffic, the old code meets them (a new enum value, a changed format). Checked by the project's `readback` command after the head version's tests wrote rows; a note when they wrote none.",
+        axes: "",
+    },
+    Rule {
         id: "MG813",
         name: "old-version-run-invalid",
         description: "The base version's test run proves nothing: it fails on its own database, cannot start, rebuilt the database, or passes with the tables gone. Nothing was checked.",
