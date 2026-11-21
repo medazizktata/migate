@@ -466,6 +466,56 @@ fn sarif_output_has_rules_results_and_stable_fingerprints() {
 }
 
 #[test]
+fn record_into_a_closed_pipe_still_writes_the_ledger() {
+    let r = Repo::new();
+    r.write(ORDERS, "create_table :orders\n");
+    r.write(TOTAL, "add_column :orders, :total, :integer\n");
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader); // what `| head` leaves once it has read enough and gone
+    let status = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .current_dir(&r.dir)
+        .args(["ledger", "record", "--migrator", "rails", "--all"])
+        .stdout(writer)
+        .status()
+        .unwrap();
+    assert!(status.success(), "{status:?}");
+    let ledger = r.read("migate-ledger.json");
+    assert!(
+        ledger.contains("20260101000000_create_orders")
+            && ledger.contains("20260102000000_add_total"),
+        "{ledger}"
+    );
+}
+
+#[test]
+fn an_unknown_id_lists_the_known_ones() {
+    let r = Repo::new();
+    r.write(ORDERS, "create_table :orders\n");
+    r.write(TOTAL, "add_column :orders, :total, :integer\n");
+    let out = r.record("rails", &["create_orders"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "{err}");
+    assert!(
+        err.contains("`create_orders`")
+            && err.contains("20260101000000_create_orders, 20260102000000_add_total"),
+        "{err}"
+    );
+}
+
+#[test]
+fn check_help_names_the_sandbox_rules() {
+    let out = Command::new(env!("CARGO_BIN_EXE_migate"))
+        .args(["check", "--help"])
+        .output()
+        .unwrap();
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        help.contains("MG810") && help.contains("MG701") && help.contains("[sandbox]"),
+        "{help}"
+    );
+}
+
+#[test]
 fn record_all_adopts_every_migration_and_conflicts_with_ids() {
     let r = Repo::new();
     r.write(ORDERS, "create_table :orders\n");

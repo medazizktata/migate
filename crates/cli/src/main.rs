@@ -42,7 +42,12 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Check migrations against the ledger and the base branch: frozen (MG001-MG003, MG007) and in order (MG004-MG006)
+    /// Check migrations against the ledger and the base branch, and, with [sandbox], run them and the old tests
+    ///
+    /// Always: migrations frozen once production ran them (MG001-MG003, MG007) and in order (MG004-MG006). With a
+    /// [sandbox] section in migate.toml: the base version's tests against a database migrated to head (MG810), the
+    /// schema diff and data-loss checks (MG1xx-MG6xx), syntax production's engine lacks (MG701), the sandbox's own
+    /// limits (MG8xx) and contract markers (MG901). Every rule, with its meaning, is in crates/core/src/rules.rs.
     Check(check::CheckArgs),
     /// The ledger of migrations production has run
     #[command(subcommand)]

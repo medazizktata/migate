@@ -139,7 +139,7 @@ pub fn check(args: &CheckArgs) -> Outcome {
             if let Some(e) = &c.not_checked {
                 eprintln!("migate: could not check: {e}");
             }
-            print!("{}", output::render(args.format, &c.findings, &cx));
+            emit(&output::render(args.format, &c.findings, &cx));
             // An error found is a failure whatever else happened; only then does "could not check" decide.
             if c.findings.iter().any(|f| f.severity == Severity::Error) {
                 Outcome::Errors
@@ -152,7 +152,7 @@ pub fn check(args: &CheckArgs) -> Outcome {
         Err(e) => {
             eprintln!("migate: could not check: {e}");
             if let Some(report) = output::render_failure(args.format, &e) {
-                print!("{report}");
+                emit(&report);
             }
             Outcome::CouldNotCheck
         }
@@ -284,17 +284,35 @@ fn run_record(args: &RecordArgs, s: &Settings) -> Result<Outcome, String> {
     } else {
         args.ids.clone()
     };
-    let mut refused = false;
+    let (mut refused, mut said) = (false, String::new());
     for id in &ids {
         let Some(file) = project.files.iter().find(|f| &f.id == id) else {
-            return Err(format!("no migration file for `{id}`"));
+            let known: Vec<&str> = project.files.iter().map(|f| f.id.as_str()).collect();
+            let shown = known
+                .iter()
+                .take(10)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = known.len().saturating_sub(10);
+            return Err(format!(
+                "no migration file for `{id}`; the {} ids here are: {shown}{}",
+                s.migrator.id,
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                }
+            ));
         };
         let entry = match s.ledger_format {
             ledger_file::Format::Sha256 => file.raw_entry(),
             ledger_file::Format::Migate => file.entry(),
         };
         match ledger.get(id) {
-            Some(existing) if *existing == entry => println!("already recorded: {id}"),
+            Some(existing) if *existing == entry => {
+                said.push_str(&format!("already recorded: {id}\n"))
+            }
             Some(_) => {
                 eprintln!(
                     "error: `{id}` is already in the ledger with other hashes; the ledger is append-only"
@@ -303,13 +321,22 @@ fn run_record(args: &RecordArgs, s: &Settings) -> Result<Outcome, String> {
             }
             None => {
                 ledger.insert(id.clone(), entry);
-                println!("recorded: {id}");
+                said.push_str(&format!("recorded: {id}\n"));
             }
         }
     }
     if refused {
+        emit(&said);
         return Ok(Outcome::Errors);
     }
+    // Written before anything is said, so a reader that leaves early (`| head`) cannot cost the ledger.
     ledger_file::write(&path, &ledger, s.ledger_format)?;
+    emit(&said);
     Ok(Outcome::Clean)
+}
+
+/// Standard output that tolerates a reader leaving early (`migate ... | head`): what is left is dropped, not a panic.
+fn emit(text: &str) {
+    use std::io::Write;
+    let _ = std::io::stdout().lock().write_all(text.as_bytes());
 }
