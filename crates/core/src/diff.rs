@@ -104,6 +104,31 @@ pub fn classify_with(changes: &[Change], filled: &BTreeSet<String>) -> Vec<Findi
             _ => None,
         })
         .collect();
+    // A column dropped and one added at the same position with the same definition, in one table: perhaps a rename.
+    // Both findings stand (a rename breaks the running app as surely as a drop); this only names the pairing, which
+    // a schema diff cannot prove (MG202 would need an explicit marker).
+    let renames: Vec<(&Object, &Object)> = changes
+        .iter()
+        .filter_map(|c| match c {
+            Change::Dropped(d) => Some(*d),
+            _ => None,
+        })
+        .filter_map(|d| {
+            let Detail::Column(was) = &d.detail else {
+                return None;
+            };
+            changes.iter().find_map(|c| match c {
+                Change::Added(a)
+                    if a.namespace == d.namespace
+                        && a.parent == d.parent
+                        && matches!(&a.detail, Detail::Column(now) if now == was) =>
+                {
+                    Some((d, *a))
+                }
+                _ => None,
+            })
+        })
+        .collect();
     let mut out = Vec::new();
     for change in changes {
         let o = match change {
@@ -122,6 +147,26 @@ pub fn classify_with(changes: &[Change], filled: &BTreeSet<String>) -> Vec<Findi
             Change::Added(o) => added(o, &mut emit),
             Change::Dropped(o) => dropped(o, &mut emit),
             Change::Changed { base, head } => changed(base, head, &mut emit),
+        }
+        let hint = match change {
+            Change::Dropped(o) => renames.iter().find(|(d, _)| std::ptr::eq(*d, *o)).map(
+                |(_, a)| {
+                    format!(
+                        "; or renamed to {}: the running app still uses the old name either way",
+                        a.name
+                    )
+                },
+            ),
+            Change::Added(o) => renames
+                .iter()
+                .find(|(_, a)| std::ptr::eq(*a, *o))
+                .map(|(d, _)| format!("; or the renamed {}", d.name)),
+            Change::Changed { .. } => None,
+        };
+        if let Some(hint) = hint {
+            for f in &mut out[start..] {
+                f.message.push_str(&hint);
+            }
         }
         if let (Change::Added(o), Some(table)) = (change, o.parent.as_deref())
             && constrained_columns(o).is_some_and(|cols| {
@@ -1110,6 +1155,41 @@ mod tests {
             &snap(with(base_objects(), validated)),
         ));
         assert_eq!(f[0].message, "CHECK now validated");
+    }
+
+    #[test]
+    fn a_drop_and_an_identical_add_in_place_say_they_may_be_a_rename() {
+        let b = snap(base_objects());
+        let renamed = with(
+            without(base_objects(), Kind::Column, "a"),
+            column("b", 1, text(), true, Some("'x'")),
+        );
+        let f = classify(&diff(&b, &snap(renamed)));
+        let by_rule = |r: &str| f.iter().find(|f| f.rule == r).map(|f| f.message.clone());
+        assert_eq!(
+            by_rule("MG201").as_deref(),
+            Some(
+                "column dropped; or renamed to b: the running app still uses the old name either way"
+            )
+        );
+        assert!(
+            f.iter()
+                .filter(|f| f.object == "main.t.b")
+                .all(|f| f.message.ends_with("; or the renamed a")),
+            "{f:?}"
+        );
+        let retyped = with(
+            without(base_objects(), Kind::Column, "a"),
+            column(
+                "b",
+                1,
+                ty("INTEGER", TypeFamily::Integer, None, None, None),
+                true,
+                None,
+            ),
+        );
+        let f = classify(&diff(&b, &snap(retyped)));
+        assert!(f.iter().all(|f| !f.message.contains("renamed")), "{f:?}");
     }
 
     #[test]
