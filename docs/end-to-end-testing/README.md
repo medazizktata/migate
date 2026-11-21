@@ -36,10 +36,12 @@ One document per run, named by its date.
 | 5 | 2026-11-20 | Trigger-probe blind test | `2026-11-20-trigger-probe.md` |
 | 6 | 2026-11-20 | Dogfood 3 | `2026-11-20-dogfood-3.md` |
 | 7 | 2026-11-21 | Dogfood 4 | `2026-11-21-dogfood-4.md` |
+| 8 | 2026-11-21 | Sample apps, every bundled migrator on both engines | `2026-11-21-sample-apps-all-migrators.md` |
 
 ## Not covered yet
 
-- Prisma and Drizzle end to end (a package download), Rails on SQLite (the `sqlite3` gem).
 - A real PostgreSQL project with real history (only minimal sample apps so far).
 - MG002, MG003, MG007 end to end, MG105 by a table rebuild, MG801 and MG805, and a project's own contract-marker
   convention.
+- SQL inside TypeScript, Python or Ruby migrations, for the syntax-version check (MG701): reported as not checked
+  (MG801) since TASK-78.
