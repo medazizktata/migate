@@ -61,6 +61,12 @@ The old version's tests are the primary check, and the schema rules still decide
 clear a schema error, since a suite that only reads a table cannot vouch for a trigger that rejects writes to it. A
 constraint on a column the same change adds, empty in every existing row after the migration, is a note.
 
+Lost data needs rows to be seen, so set `seed` when the tests delete their own rows. A rebuilt table whose children
+cascade on delete is an error even without rows (MG104) when the tool renames a copy into place, as Drizzle does
+(drizzle-orm#4938); Django rebuilds that way too, but only with foreign keys off, so it is exempt. A tool that drops
+the table and creates it again under its own name leaves no trace without rows: Rails 8.1 on SQLite does this, and its
+`change_column_null` deleted a parent's cascading children in our test, so with Rails only a seed shows it (MG105).
+
 An intended breaking change (the contract step of expand/contract) is accepted by a comment in the new migration, naming
 one rule and one object, with a reason:
 

@@ -123,6 +123,8 @@ struct Def {
     out_of_order: String,
     #[serde(default)]
     silent_skip: bool,
+    #[serde(default)]
+    foreign_keys_off_for_rebuilds: bool,
     #[serde(default = "block")]
     duplicate_versions: String,
     checksum: ChecksumName,
@@ -137,6 +139,8 @@ pub struct Migrator {
     pub name: String,
     pub history: History,
     pub migrate: Migrate,
+    /// The tool rebuilds a table only with foreign keys really off, so a rebuild cannot cascade (MG104 stays quiet).
+    pub foreign_keys_off_for_rebuilds: bool,
     pattern: Regex,
     journal: Option<Journal>,
     graph: Option<Graph>,
@@ -215,6 +219,7 @@ impl Migrator {
             name: d.name,
             history: d.history,
             migrate: d.migrate,
+            foreign_keys_off_for_rebuilds: d.foreign_keys_off_for_rebuilds,
             pattern,
             journal: d.journal,
             graph,
@@ -476,6 +481,20 @@ mod tests {
                 get(name).unwrap().unwrap().id,
                 *name,
                 "file name matches id"
+            );
+        }
+    }
+
+    #[test]
+    fn only_django_says_its_rebuilds_keep_foreign_keys_off() {
+        // Measured 2026-11-21: Django 6.1 refuses to rebuild with foreign keys on; Rails 8.1's rebuild cascade-deleted
+        // children (its PRAGMA foreign_keys = OFF is ignored inside the migration's transaction).
+        for m in bundled().unwrap() {
+            assert_eq!(
+                m.foreign_keys_off_for_rebuilds,
+                m.id == "django",
+                "{}",
+                m.id
             );
         }
     }

@@ -78,6 +78,12 @@ pub const RULES: &[Rule] = &[
         axes: "BD",
     },
     Rule {
+        id: "MG104",
+        name: "rebuild-cascades",
+        description: "The migration rebuilt a table (dropped it and renamed a copy into its place) that other tables reference with ON DELETE CASCADE or SET NULL. Wherever foreign keys are enforced during the migration, as Cloudflare D1 always does, dropping the original deletes or blanks every child row. Seen on any database, rows or not, when the copy is renamed into place; a rebuild that drops the table and creates it again under its own name (as Rails does) leaves no trace without rows, and only MG105 on a seeded database catches it. Tools that rebuild with foreign keys really off (Django) are exempt in their migrator file.",
+        axes: "D",
+    },
+    Rule {
         id: "MG105",
         name: "rows-lost",
         description: "A table has fewer rows after the migration than before, on a database holding the rows the base version's tests and seed wrote. A rebuild of a parent table with ON DELETE CASCADE children deletes the children this way.",

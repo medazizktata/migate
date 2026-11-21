@@ -4,6 +4,9 @@ name = "Django"
 path_pattern = '(?:^|/)(?P<group>[^/]+)/migrations/(?P<id>(?P<version>\d{4}_[^/]+))\.py$'
 order = "graph"
 out_of_order = "block"
+# Django's SQLite schema editor refuses to run unless foreign keys are really off (DatabaseSchemaEditor.__enter__
+# raises NotSupportedError otherwise), so its table rebuilds never cascade-delete children (MG104).
+foreign_keys_off_for_rebuilds = true
 checksum = "none"
 
 

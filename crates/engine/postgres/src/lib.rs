@@ -381,6 +381,10 @@ impl engine::Database for Db<'_> {
     fn schema_sql(&self) -> Result<BTreeMap<String, String>, String> {
         Ok(BTreeMap::new())
     }
+    /// None needed: PostgreSQL drops a referenced table only with its references, which the diff reports.
+    fn table_identities(&self) -> Result<BTreeMap<String, String>, String> {
+        Ok(BTreeMap::new())
+    }
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
         let mut out = BTreeMap::new();
         for r in rows(&self.0.bin, &self.0.url, &unmodelled_query())? {

@@ -19,7 +19,7 @@ use signal_hook::iterator::Signals;
 use migate_core::contract;
 use migate_core::diff::{Change, classify_with, diff};
 use migate_core::engine::{Database, TriggerProbe};
-use migate_core::schema::{Kind, Snapshot};
+use migate_core::schema::{Detail, Kind, Snapshot};
 use migate_core::{Finding, Severity};
 use migate_migrators::Migrator;
 
@@ -309,6 +309,7 @@ pub fn run(
     } else {
         BTreeMap::new()
     };
+    let identities_before = db.table_identities()?;
 
     eprintln!("migate: migrating it to HEAD");
     let out = kept.save("head-migrate", sh(&migrate, &head_dir, &migrate_env)?)?;
@@ -320,6 +321,37 @@ pub fn run(
         None => None,
     };
     let mut findings = too_new;
+    // A parent rebuilt in place takes its cascading children with it when it is dropped (drizzle-orm#4938).
+    let identities_after = db.table_identities()?;
+    let rebuilt: BTreeSet<&String> = identities_before
+        .iter()
+        .filter(|(table, page)| identities_after.get(*table).is_some_and(|now| now != *page))
+        .map(|(table, _)| table)
+        .collect();
+    for o in before.objects() {
+        let Detail::ForeignKey(fk) = &o.detail else {
+            continue;
+        };
+        let parent = format!("{}.{}", fk.ref_namespace, fk.ref_table);
+        let what = match fk.on_delete.to_ascii_uppercase().as_str() {
+            "CASCADE" => "deletes",
+            "SET NULL" | "SET DEFAULT" => "blanks the reference in",
+            _ => continue,
+        };
+        if rebuilt.contains(&parent) && !migrator.foreign_keys_off_for_rebuilds {
+            let child = format!("{}.{}", o.namespace, o.parent.as_deref().unwrap_or("?"));
+            findings.push(Finding::new(
+                "MG104",
+                Severity::Error,
+                parent.clone(),
+                format!(
+                    "rebuilt (dropped, then a copy renamed into its place); with foreign keys enforced during the \
+                     migration, as D1 always does, dropping it {what} every row of {child} (ON DELETE {})",
+                    fk.on_delete
+                ),
+            ));
+        }
+    }
     // The definitions the head migrations added or changed, as the engine stores them: what a migration that is not
     // a SQL file wrote, whatever language built it.
     if let (true, Some(target)) = (unread, &cfg.target_version) {

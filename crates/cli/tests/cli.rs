@@ -840,6 +840,38 @@ ALTER TABLE users_new RENAME TO users;";
     );
 }
 
+const REBUILD_USERS: &str =
+    "CREATE TABLE users_new (id INTEGER PRIMARY KEY, email TEXT, legacy TEXT);
+INSERT INTO users_new SELECT id, email, legacy FROM users;
+DROP TABLE users;
+ALTER TABLE users_new RENAME TO users;";
+
+#[test]
+fn a_rebuilt_parent_of_cascading_children_is_an_error_without_any_rows() {
+    // drizzle-orm#4938 with no seed: the old tests write no posts, so no row is there to be lost and counted.
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users ON DELETE CASCADE);";
+    let r = sandbox_repo_full(SANDBOX_TOML, OLD_APP, first, REBUILD_USERS);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("error   MG104  main.users")
+            && out.contains("deletes every row of main.posts (ON DELETE CASCADE)"),
+        "{out}"
+    );
+    assert!(!out.contains("MG105"), "no row was there to lose: {out}");
+}
+
+#[test]
+fn a_rebuild_without_cascading_children_passes() {
+    let first = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, legacy TEXT);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users);";
+    let r = sandbox_repo_full(SANDBOX_TOML, OLD_APP, first, REBUILD_USERS);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!out.contains("MG104"), "{out}");
+}
+
 #[test]
 fn migrations_come_from_git_not_from_ignored_folders() {
     let r = Repo::new();

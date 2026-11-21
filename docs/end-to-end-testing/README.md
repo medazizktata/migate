@@ -37,6 +37,7 @@ One document per run, named by its date.
 | 6 | 2026-11-20 | Dogfood 3 | `2026-11-20-dogfood-3.md` |
 | 7 | 2026-11-21 | Dogfood 4 | `2026-11-21-dogfood-4.md` |
 | 8 | 2026-11-21 | Sample apps, every bundled migrator on both engines | `2026-11-21-sample-apps-all-migrators.md` |
+| 9 | 2026-11-21 | Table rebuilds and cascading children, on real tools | `2026-11-21-rebuild-cascades.md` |
 
 ## Not covered yet
 

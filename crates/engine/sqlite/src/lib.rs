@@ -158,6 +158,18 @@ pub fn unmodelled(path: &Path) -> Result<BTreeMap<String, String>, Error> {
     Ok(found)
 }
 
+/// Each table's first storage page in the database at `path`, by `main.table`: a rebuild (drop, then rename a copy
+/// into place) gives the table a new one; ALTER TABLE keeps it.
+pub fn table_identities(path: &Path) -> Result<BTreeMap<String, String>, Error> {
+    check_file(path)?;
+    let copy = copy_of(&[("main", path)])?;
+    let found = copy
+        .prepare("SELECT name, rootpage FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'")?
+        .query_map([], |r| Ok((format!("main.{}", r.get::<_, String>(0)?), r.get::<_, i64>(1)?.to_string())))?
+        .collect::<Result<_, _>>()?;
+    Ok(found)
+}
+
 /// Every schema object's stored definition in the database at `path`, `type main.name` -> its SQL, SQLite's own
 /// objects left out.
 pub fn schema_sql(path: &Path) -> Result<BTreeMap<String, String>, Error> {
@@ -868,6 +880,9 @@ impl engine::Database for File {
     }
     fn schema_sql(&self) -> Result<BTreeMap<String, String>, String> {
         schema_sql(&self.0).map_err(|e| e.0)
+    }
+    fn table_identities(&self) -> Result<BTreeMap<String, String>, String> {
+        table_identities(&self.0).map_err(|e| e.0)
     }
     fn newer_writer(&self) -> Option<String> {
         newer_writer(&self.0)

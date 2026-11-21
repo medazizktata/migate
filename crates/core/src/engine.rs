@@ -62,6 +62,11 @@ pub trait Database {
     /// Whether `trigger` on `table` would refuse any row the table holds if it were written again. Never writes to the
     /// database itself.
     fn probe_trigger(&self, table: &str, trigger: &str) -> Result<TriggerProbe, String>;
+    /// Each table's storage identity, `namespace.table` -> a token that changes when the table is dropped and created
+    /// again (a rebuild, copy-and-swap) but not when it is altered. Empty for an engine where a rebuild cannot delete a
+    /// child's rows on its own (PostgreSQL refuses to drop a referenced table without dropping the reference, which
+    /// the schema diff reports).
+    fn table_identities(&self) -> Result<BTreeMap<String, String>, String>;
     /// Every schema object's definition as the engine keeps it, `type name` -> its SQL text, for the syntax check on
     /// what migrations left behind when their own files cannot be read. Empty for an engine that keeps no such text
     /// or needs no such check.
