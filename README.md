@@ -51,6 +51,9 @@ prints. Any client that prints the migrator's history query one row per line wor
 
 ```sh
 migate history --history-command 'psql "$PROD_URL" -XAtc "SELECT name FROM payload_migrations WHERE batch <> -1"'
+# Cloudflare D1 (Wrangler's own client; tested with --local, whose JSON has the same shape):
+migate history --history-command 'npx wrangler d1 execute DB --remote --json \
+  --command "SELECT name FROM payload_migrations WHERE batch <> -1" | jq -r ".[0].results[].name"'
 ```
 
 `migate check` always checks the migration files against the ledger and the order rules (no database needed). With a

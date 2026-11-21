@@ -38,6 +38,7 @@ One document per run, named by its date.
 | 7 | 2026-11-21 | Dogfood 4 | `2026-11-21-dogfood-4.md` |
 | 8 | 2026-11-21 | Sample apps, every bundled migrator on both engines | `2026-11-21-sample-apps-all-migrators.md` |
 | 9 | 2026-11-21 | Table rebuilds and cascading children, on real tools | `2026-11-21-rebuild-cascades.md` |
+| 10 | 2026-11-21 | migate history on real migrators' history tables | `2026-11-21-history-on-real-tools.md` |
 
 ## Not covered yet
 
