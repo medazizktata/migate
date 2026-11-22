@@ -1728,6 +1728,14 @@ fn the_next_run_stops_the_server_a_killed_run_left() {
 }
 
 #[test]
+fn postgres_migrations_may_name_the_postgres_role() {
+    // Real projects grant to the superuser every default install and managed service has.
+    let r = pg_repo("grant select on users to postgres;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+}
+
+#[test]
 fn drizzle_on_postgres_keeps_its_history_in_its_own_schema() {
     // Like drizzle-kit on Postgres: applied migrations are recorded in drizzle.__drizzle_migrations.
     let apply = r#"set -e

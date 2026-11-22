@@ -37,7 +37,9 @@ pub const CAPABILITIES: [Kind; 13] = [
 ];
 
 const DATABASE: &str = "migate";
-const USER: &str = "migate";
+/// The throwaway server's superuser: `postgres`, as in a default install, Supabase and most managed services, since
+/// real migrations name it (`GRANT ... TO postgres`, `ALTER DEFAULT PRIVILEGES FOR ROLE postgres`).
+const USER: &str = "postgres";
 
 /// A throwaway Postgres: a fresh cluster in `dir`, served on a free local port until dropped.
 #[derive(Debug)]
