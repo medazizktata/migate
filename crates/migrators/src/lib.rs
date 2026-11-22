@@ -144,6 +144,8 @@ pub struct Migrator {
     /// The tool rebuilds a table only with foreign keys really off, so a rebuild cannot cascade (MG104 stays quiet).
     pub foreign_keys_off_for_rebuilds: bool,
     pattern: Regex,
+    /// The one folder (relative to the project, no trailing `/`) whose files count, when the project names it.
+    dir: Option<String>,
     journal: Option<Journal>,
     graph: Option<Graph>,
     policy: Policy,
@@ -223,6 +225,7 @@ impl Migrator {
             migrate: d.migrate,
             foreign_keys_off_for_rebuilds: d.foreign_keys_off_for_rebuilds,
             pattern,
+            dir: None,
             journal: d.journal,
             graph,
             policy: Policy {
@@ -248,13 +251,27 @@ impl Migrator {
         self.policy.out_of_order = out_of_order;
     }
 
+    /// Only files under `dir` (relative to the project) are this migrator's: a project with two migration sets
+    /// (D1 and Supabase, say) names the one this tool runs, as Wrangler's `migrations_dir` does.
+    pub fn set_migrations_dir(&mut self, dir: &str) {
+        let dir = dir.trim_start_matches("./").trim_end_matches('/');
+        self.dir = (!dir.is_empty()).then(|| dir.to_string());
+    }
+
+    fn in_dir(&self, path: &str) -> bool {
+        self.dir.as_deref().is_none_or(|dir| {
+            path.strip_prefix(dir)
+                .is_some_and(|rest| rest.starts_with('/'))
+        })
+    }
+
     pub fn checksum(&self) -> MigratorChecksum {
         self.checksum
     }
 
     /// Whether a project file (path relative to the project, with '/') is one this migrator reads.
     pub fn matches(&self, path: &str) -> bool {
-        self.pattern.is_match(path)
+        self.in_dir(path) && self.pattern.is_match(path)
     }
 
     /// The project's migrations, from `(path relative to the project with '/', contents)` pairs. Files the pattern
@@ -275,7 +292,7 @@ impl Migrator {
     ) -> Result<Vec<(Migration, String)>, Error> {
         let mut out = Vec::new();
         for (path, text) in files {
-            let Some(caps) = self.pattern.captures(path) else {
+            let Some(caps) = self.pattern.captures(path).filter(|_| self.in_dir(path)) else {
                 continue;
             };
             match &self.journal {

@@ -100,6 +100,9 @@ fn settings(c: &Common, base_flag: Option<&String>) -> Result<Settings, String> 
                     }
                 });
             }
+            if let Some(dir) = &file.migrations_dir {
+                m.set_migrations_dir(dir);
+            }
             if let Some(query) = &file.history_query {
                 m.history.query = query.clone();
                 m.history.postgres = None;

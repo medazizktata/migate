@@ -6,6 +6,7 @@
 //! base = "origin/main"
 //! out_of_order = "block"                    # optional: the project's runner refuses migrations older than the last
 //! history_query = "SELECT version FROM dbmate.schema_migrations"   # optional: where the project keeps its history
+//! migrations_dir = "d1/migrations"           # optional: the one folder this migrator runs, beside other sets
 //!
 //! # Optional: migrate a throwaway SQLite database at base and at head, diff the schemas, run the base version's tests.
 //! [sandbox]
@@ -42,6 +43,8 @@ pub struct Config {
     /// Overrides the migrator's history query when the project keeps the history elsewhere (dbmate's
     /// `--migrations-table`, a renamed table): one row per applied migration, as the migrator records it.
     pub history_query: Option<String>,
+    /// The folder whose migrations this migrator runs, when the project keeps more than one migration set.
+    pub migrations_dir: Option<String>,
     pub sandbox: Option<Sandbox>,
 }
 

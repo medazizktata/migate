@@ -539,6 +539,38 @@ fn an_empty_or_failing_history_cannot_pass_and_never_prints_credentials() {
 }
 
 #[test]
+fn migrations_dir_keeps_one_migration_set_apart_from_another() {
+    // A project with D1 migrations and Supabase migrations side by side; Wrangler runs only d1/migrations.
+    let r = Repo::new();
+    r.write("d1/migrations/0001_cms.sql", "CREATE TABLE a (id INTEGER);");
+    r.write(
+        "supabase/migrations/20260101000000_crm.sql",
+        "CREATE TABLE b (id INTEGER);",
+    );
+    r.commit("init");
+    let both = r.record("wrangler-d1", &["--all"]);
+    assert!(both.status.success());
+    assert!(
+        r.read("migate-ledger.json")
+            .contains("20260101000000_crm.sql")
+    );
+    let r = Repo::new();
+    r.write("migate.toml", "migrations_dir = \"d1/migrations\"\n");
+    r.write("d1/migrations/0001_cms.sql", "CREATE TABLE a (id INTEGER);");
+    r.write(
+        "supabase/migrations/20260101000000_crm.sql",
+        "CREATE TABLE b (id INTEGER);",
+    );
+    r.commit("init");
+    assert!(r.record("wrangler-d1", &["--all"]).status.success());
+    let ledger = r.read("migate-ledger.json");
+    assert!(
+        ledger.contains("0001_cms.sql") && !ledger.contains("crm"),
+        "{ledger}"
+    );
+}
+
+#[test]
 fn record_into_a_closed_pipe_still_writes_the_ledger() {
     let r = Repo::new();
     r.write(ORDERS, "create_table :orders\n");
