@@ -51,10 +51,14 @@ prints. Any client that prints the migrator's history query one row per line wor
 
 ```sh
 migate history --history-command 'psql "$PROD_URL" -XAtc "SELECT name FROM payload_migrations WHERE batch <> -1"'
-# Cloudflare D1 (Wrangler's own client; tested with --local, whose JSON has the same shape):
+# Cloudflare D1, through Wrangler's own client (tested with --local; not yet run against a production database):
 migate history --history-command 'npx wrangler d1 execute DB --remote --json \
-  --command "SELECT name FROM payload_migrations WHERE batch <> -1" | jq -r ".[0].results[].name"'
+  --command "SELECT name FROM payload_migrations WHERE batch <> -1" \
+  | jq -r "if type == \"array\" then .[0].results[].name else error(.error.text) end"'
 ```
+
+Wrangler reports a failure as a JSON object rather than rows, so the filter turns it into Wrangler's own message.
+D1's `database_id` must be the real one: a committed placeholder reaches no database (Cloudflare error 7404).
 
 `migate check` always checks the migration files against the ledger and the order rules (no database needed). With a
 `[sandbox]` section in `migate.toml` it also migrates a throwaway SQLite database at the base branch and at HEAD, reports
