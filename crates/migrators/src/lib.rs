@@ -16,6 +16,7 @@ const BUNDLED: &[(&str, &str)] = &[
     ("wrangler-d1", include_str!("../migrators/wrangler-d1.toml")),
     ("rails", include_str!("../migrators/rails.toml")),
     ("django", include_str!("../migrators/django.toml")),
+    ("supabase", include_str!("../migrators/supabase.toml")),
 ];
 
 #[derive(Debug)]
@@ -473,7 +474,8 @@ mod tests {
                 "drizzle",
                 "wrangler-d1",
                 "rails",
-                "django"
+                "django",
+                "supabase",
             ]
         );
         for (name, _) in BUNDLED {
@@ -483,6 +485,32 @@ mod tests {
                 "file name matches id"
             );
         }
+    }
+
+    #[test]
+    fn supabase_reads_its_migrations_folder_and_versions() {
+        let m = get("supabase").unwrap().unwrap();
+        let got = m
+            .migrations(&files(&[
+                (
+                    "apps/web/supabase/migrations/20260716120000_web_portal_schema.sql",
+                    "",
+                ),
+                ("apps/web/supabase/seed.sql", ""),
+            ]))
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![Migration::linear(
+                "20260716120000_web_portal_schema",
+                "20260716120000"
+            )]
+        );
+        assert!(
+            m.history
+                .query
+                .contains("supabase_migrations.schema_migrations")
+        );
     }
 
     #[test]

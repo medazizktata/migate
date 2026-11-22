@@ -16,7 +16,7 @@ use crate::{config, ledger_file, project};
 
 #[derive(Debug, Args)]
 pub struct Common {
-    /// Migration tool: payload, prisma, drizzle, wrangler-d1, rails, django (or `migrator` in migate.toml)
+    /// Migration tool: payload, prisma, drizzle, wrangler-d1, rails, django, supabase (or `migrator` in migate.toml)
     #[arg(long)]
     pub migrator: Option<String>,
     /// Project directory

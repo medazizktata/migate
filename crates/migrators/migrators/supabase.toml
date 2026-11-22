@@ -1,0 +1,20 @@
+id = "supabase"
+name = "Supabase CLI migrations"
+# Files: supabase/migrations/<14-digit version>_<name>.sql; supabase_migrations.schema_migrations stores the version.
+path_pattern = '(?:^|/)supabase/migrations/(?P<id>(?P<version>\d{14})_[^/]+)\.sql$'
+order = "timestamp-prefix"
+# `supabase migration up` applies a pending migration older than the last one applied only with --include-all
+# ("Include all migrations not found on remote history table", CLI 2.121 help); a project whose release uses that
+# flag can set out_of_order = "warn" in migate.toml.
+out_of_order = "block"
+# The history table keeps each migration's statements, but `migration up` does not compare them with the files.
+checksum = "none"
+
+[history]
+kind = "full"
+query = "SELECT version FROM supabase_migrations.schema_migrations"
+
+[migrate]
+# Applies to any PostgreSQL by URL, no Docker; run where the supabase/ folder is (a monorepo sets `migrate` itself).
+command = 'supabase migration up --include-all --db-url "{url}?sslmode=disable"'
+env = {}
