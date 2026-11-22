@@ -28,3 +28,9 @@ postgres = "SELECT created_at FROM drizzle.__drizzle_migrations ORDER BY created
 # --no: never download a package the project does not have.
 command = "npx --no drizzle-kit migrate"
 env = {}
+
+[references]
+# Drizzle's schema code names each column as a string (text('stock_count')), in a file that names its table.
+files = ["**/*.{ts,mts,cts,js,mjs}"]
+patterns = ['''["'`]{column}["'`]''']
+with_table = true

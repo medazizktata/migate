@@ -120,6 +120,12 @@ pub const RULES: &[Rule] = &[
         axes: "BLD",
     },
     Rule {
+        id: "MG212",
+        name: "dropped-column-still-used",
+        description: "A dropped (or renamed) column the version still serving traffic uses, by its ORM's own rule (a model field, a schema entry, a raw query naming it; Rails: any column not in ignored_columns). No contract marker can accept it: stop using the column in one release, drop it in the next.",
+        axes: "BLD",
+    },
+    Rule {
         id: "MG203",
         name: "add-required-column-without-default",
         description: "A NOT NULL column without a default was added. Inserts from the running app, which does not know the column, fail; on a table with rows the migration itself can fail.",

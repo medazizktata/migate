@@ -17,3 +17,8 @@ query = "SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT 
 [migrate]
 command = "npx --no prisma migrate deploy"
 env = {}
+
+[references]
+# The schema is the reference: a field named like the column, or mapped to it.
+files = ["**/*.prisma"]
+patterns = ['^\s*{column}\s', '^\s*{field}\s', '@map\("{column}"\)']

@@ -980,6 +980,48 @@ fn rollback_repo(wrote: Option<&str>) -> Repo {
     r
 }
 
+/// The sandbox with no tests: what a schema diff and a contract marker alone would let through.
+fn untested() -> String {
+    SANDBOX_TOML.replace("test = \"python3 old_app.py\"\n", "")
+}
+
+#[test]
+fn dropping_a_column_the_old_code_still_queries_is_an_error_a_marker_cannot_accept() {
+    // GitHub, Aug 2025: dropped on purpose, the drop accepted, while the running code still read the column.
+    let drop = "-- migate: contract drop-column users.legacy -- the app stopped writing it\nALTER TABLE users DROP COLUMN legacy;";
+    let r = sandbox_repo(&untested(), drop);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("error   MG212  main.users.legacy") && out.contains("old_app.py:"),
+        "{out}"
+    );
+    assert!(
+        out.contains("accepted by the contract"),
+        "the drop itself was accepted: {out}"
+    );
+}
+
+#[test]
+fn renaming_a_column_the_old_code_still_uses_is_an_error() {
+    // Buildkite, 2026: a rename with the safety override added, while the running code used the old name.
+    let rename = "-- migate: contract drop-column users.legacy -- renamed, safe\nALTER TABLE users RENAME COLUMN legacy TO archived;";
+    let r = sandbox_repo(&untested(), rename);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(out.contains("error   MG212  main.users.legacy"), "{out}");
+}
+
+#[test]
+fn a_drop_after_the_code_stopped_using_the_column_passes() {
+    // Proper expand/contract: the version still serving traffic no longer names the column.
+    let drop = "-- migate: contract drop-column users.legacy -- unused since the last release\nALTER TABLE users DROP COLUMN legacy;";
+    let r = sandbox_repo_with(&untested(), OLD_APP_WITHOUT_LEGACY, drop);
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!out.contains("MG212"), "{out}");
+}
+
 #[test]
 fn a_project_names_where_it_keeps_its_history() {
     // As dbmate's --migrations-table: the history lives in a table the migrator's file does not name.

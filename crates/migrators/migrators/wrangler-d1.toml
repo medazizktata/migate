@@ -20,3 +20,10 @@ query = "SELECT name FROM d1_migrations"
 command = "npx --no wrangler d1 migrations apply {database} --local --persist-to {dir}"
 env = {}
 database = "{dir}/v3/d1/miniflare-D1DatabaseObject/*.sqlite"
+
+[references]
+# Raw SQL in the app's code: the column's name in a file that also names its table (migrations excluded). The weakest
+# rule: a query built at run time, or a name shared with another table, can mislead it either way.
+files = ["**/*.{ts,tsx,js,mjs,cjs,py,rb,go,rs,sql,php,java,kt,cs}"]
+patterns = ['\b{column}\b']
+with_table = true

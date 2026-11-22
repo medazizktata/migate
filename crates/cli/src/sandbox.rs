@@ -411,6 +411,53 @@ pub fn run(
         .collect();
     let changes = diff(&before, &after);
     findings.extend(classify_with(&changes, &filled));
+    // A dropped column the base version's code still uses, by its ORM's rule (MG212); no marker accepts it.
+    let dropped: Vec<&migate_core::schema::Object> = changes
+        .iter()
+        .filter_map(|c| match c {
+            Change::Dropped(o) if matches!(o.detail, Detail::Column(_)) => Some(*o),
+            _ => None,
+        })
+        .filter(|o| {
+            after.objects().iter().any(|t| {
+                t.kind() == Kind::Table
+                    && t.namespace == o.namespace
+                    && Some(t.name.as_str()) == o.parent.as_deref()
+            })
+        })
+        .collect();
+    if !dropped.is_empty() {
+        let code = project::source_files(&base_dir)?;
+        for o in dropped {
+            let table = o.parent.as_deref().unwrap_or_default();
+            let message = match migrator.column_use(&code, table, &o.name) {
+                migate_migrators::ColumnUse::UsedAt(at) => format!(
+                    "dropped, but the version at {base} still uses it: {}{}",
+                    at.iter()
+                        .take(3)
+                        .map(|(p, l)| format!("{p}:{l}"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    if at.len() > 3 {
+                        format!(" and {} more", at.len() - 3)
+                    } else {
+                        String::new()
+                    }
+                ),
+                migate_migrators::ColumnUse::UsedByDefault => format!(
+                    "dropped, but the version at {base} loads every column of {table} and does not ignore this one \
+                     (ignored_columns)"
+                ),
+                _ => continue,
+            };
+            findings.push(Finding::new(
+                "MG212",
+                Severity::Error,
+                format!("{}.{table}.{}", o.namespace, o.name),
+                message,
+            ));
+        }
+    }
     judge_triggers(&mut findings, &changes, db.as_ref());
     let unmodelled_after = db.unmodelled()?;
     for key in unmodelled_before

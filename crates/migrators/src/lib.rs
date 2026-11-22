@@ -132,6 +132,41 @@ struct Def {
     checksum: ChecksumName,
     history: History,
     migrate: Migrate,
+    references: Option<ReferencesDef>,
+}
+
+/// Where the base version's code says it uses a column (MG212), for an ORM that keeps that knowledge in code.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReferencesDef {
+    /// The files that knowledge lives in, as globs relative to the project (`**/*.prisma`); migrations never count.
+    files: Vec<String>,
+    /// Regex patterns, with `{column}` (the database's name), `{field}` (its camelCase form), `{stem}` (without a
+    /// trailing `_id`, a foreign key's field) and `{table}` substituted, each escaped.
+    patterns: Vec<String>,
+    /// "uses": a match means the column is used. "unless": every column is used unless a pattern matches (Rails, which
+    /// loads them all and is told to skip one with ignored_columns).
+    #[serde(default = "uses")]
+    mode: String,
+    /// Count a file only if it also names the table: for raw SQL, where a column's name alone is too common.
+    #[serde(default)]
+    with_table: bool,
+}
+
+fn uses() -> String {
+    "uses".into()
+}
+
+/// What the base version's code says about a column a migration drops.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnUse {
+    /// The migrator's file has no rule for this: nothing can be said.
+    Unknown,
+    NotUsed,
+    /// Used, at these places (`path`, 1-based line).
+    UsedAt(Vec<(String, u32)>),
+    /// Used by every model unless told otherwise (Rails without ignored_columns).
+    UsedByDefault,
 }
 
 /// One migrator, read from its data file and validated.
@@ -144,6 +179,7 @@ pub struct Migrator {
     /// The tool rebuilds a table only with foreign keys really off, so a rebuild cannot cascade (MG104 stays quiet).
     pub foreign_keys_off_for_rebuilds: bool,
     pattern: Regex,
+    references: Option<(Vec<Regex>, ReferencesDef)>,
     /// The one folder (relative to the project, no trailing `/`) whose files count, when the project names it.
     dir: Option<String>,
     journal: Option<Journal>,
@@ -200,6 +236,19 @@ impl Migrator {
             }
             None => None,
         };
+        let references = match d.references {
+            Some(r) => Some((
+                r.files
+                    .iter()
+                    .map(|g| {
+                        Regex::new(&glob_regex(g))
+                            .map_err(|e| Error(format!("{}: references.files {g}: {e}", d.id)))
+                    })
+                    .collect::<Result<_, _>>()?,
+                r,
+            )),
+            None => None,
+        };
         let level = |field: &str, value: &str| match value {
             "block" => Ok(OutOfOrder::Block),
             "warn" => Ok(OutOfOrder::Warn),
@@ -225,6 +274,7 @@ impl Migrator {
             migrate: d.migrate,
             foreign_keys_off_for_rebuilds: d.foreign_keys_off_for_rebuilds,
             pattern,
+            references,
             dir: None,
             journal: d.journal,
             graph,
@@ -256,6 +306,55 @@ impl Migrator {
     pub fn set_migrations_dir(&mut self, dir: &str) {
         let dir = dir.trim_start_matches("./").trim_end_matches('/');
         self.dir = (!dir.is_empty()).then(|| dir.to_string());
+    }
+
+    /// What the base version's code (`files`: path and text, relative to the project) says about `table.column`.
+    pub fn column_use(&self, files: &[(String, String)], table: &str, column: &str) -> ColumnUse {
+        let Some((globs, def)) = &self.references else {
+            return ColumnUse::Unknown;
+        };
+        let fill = |p: &str| {
+            p.replace("{column}", &regex::escape(column))
+                .replace("{field}", &regex::escape(&camel(column)))
+                .replace(
+                    "{stem}",
+                    &regex::escape(column.strip_suffix("_id").unwrap_or(column)),
+                )
+                .replace("{table}", &regex::escape(table))
+        };
+        let Ok(patterns) = def
+            .patterns
+            .iter()
+            .map(|p| Regex::new(&fill(p)))
+            .collect::<Result<Vec<_>, _>>()
+        else {
+            return ColumnUse::Unknown;
+        };
+        let names_table = Regex::new(&format!(
+            r"\b(?:{}|{})\b",
+            regex::escape(table),
+            regex::escape(&camel(table))
+        ))
+        .expect("an escaped name is a valid pattern");
+        let mut hits = Vec::new();
+        for (path, text) in files {
+            if !globs.iter().any(|g| g.is_match(path)) || self.pattern.is_match(path) {
+                continue;
+            }
+            if def.with_table && !names_table.is_match(text) {
+                continue;
+            }
+            for (n, line) in text.lines().enumerate() {
+                if patterns.iter().any(|p| p.is_match(line)) {
+                    hits.push((path.clone(), u32::try_from(n + 1).unwrap_or(u32::MAX)));
+                }
+            }
+        }
+        match (def.mode.as_str(), hits.is_empty()) {
+            ("unless", true) => ColumnUse::UsedByDefault,
+            ("unless", false) | (_, true) => ColumnUse::NotUsed,
+            _ => ColumnUse::UsedAt(hits),
+        }
     }
 
     fn in_dir(&self, path: &str) -> bool {
@@ -367,6 +466,50 @@ pub fn get(id: &str) -> Option<Result<Migrator, Error>> {
         .iter()
         .find(|(name, _)| *name == id)
         .map(|(_, text)| Migrator::parse(text))
+}
+
+/// `snake_case` as `camelCase`: an ORM field's usual name for a column.
+fn camel(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut up = false;
+    for c in name.chars() {
+        if c == '_' {
+            up = !out.is_empty();
+        } else if up {
+            out.extend(c.to_uppercase());
+            up = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// A glob (`**/`, `*`, `?`, `{a,b}`) as an anchored regex over a project-relative path.
+fn glob_regex(glob: &str) -> String {
+    let mut re = String::from("^");
+    let mut chars = glob.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '*' if chars.peek() == Some(&'*') => {
+                chars.next();
+                if chars.peek() == Some(&'/') {
+                    chars.next();
+                    re.push_str("(?:.*/)?");
+                } else {
+                    re.push_str(".*");
+                }
+            }
+            '*' => re.push_str("[^/]*"),
+            '?' => re.push_str("[^/]"),
+            '{' => re.push_str("(?:"),
+            '}' => re.push(')'),
+            ',' => re.push('|'),
+            c => re.push_str(&regex::escape(&c.to_string())),
+        }
+    }
+    re.push('$');
+    re
 }
 
 /// The migrations a JSON journal lists, each with the file that holds its code.
@@ -530,6 +673,156 @@ mod tests {
                 .query
                 .contains("supabase_migrations.schema_migrations")
         );
+    }
+
+    #[test]
+    fn each_orm_says_in_its_own_way_whether_old_code_uses_a_column() {
+        let used = |m: &str, files: &[(&str, &str)], table: &str, column: &str| {
+            get(m)
+                .unwrap()
+                .unwrap()
+                .column_use(&files_of(files), table, column)
+        };
+        let at = |p: &str, l: u32| ColumnUse::UsedAt(vec![(p.to_string(), l)]);
+        // Rails loads every column unless the model ignores it.
+        let model = "app/models/user.rb";
+        assert_eq!(
+            used(
+                "rails",
+                &[(model, "class User < ApplicationRecord\nend\n")],
+                "users",
+                "legacy"
+            ),
+            ColumnUse::UsedByDefault
+        );
+        assert_eq!(
+            used(
+                "rails",
+                &[(model, "self.ignored_columns += %w[legacy]\n")],
+                "users",
+                "legacy"
+            ),
+            ColumnUse::NotUsed
+        );
+        // Prisma: a field named like the column, or mapped to it.
+        let schema = "prisma/schema.prisma";
+        assert_eq!(
+            used(
+                "prisma",
+                &[(
+                    schema,
+                    "model User {\n  stockCount Int @map(\"stock_count\")\n}\n"
+                )],
+                "User",
+                "stock_count"
+            ),
+            at(schema, 2)
+        );
+        assert_eq!(
+            used(
+                "prisma",
+                &[(schema, "model User {\n  id Int @id\n}\n")],
+                "User",
+                "stock_count"
+            ),
+            ColumnUse::NotUsed
+        );
+        // Django: a field, a foreign key's field (no _id), or db_column.
+        let models = "shop/models.py";
+        assert_eq!(
+            used(
+                "django",
+                &[(
+                    models,
+                    "class Item(models.Model):\n    owner = models.ForeignKey(Owner)\n"
+                )],
+                "shop_item",
+                "owner_id"
+            ),
+            at(models, 2)
+        );
+        assert_eq!(
+            used(
+                "django",
+                &[(
+                    models,
+                    "    qty = models.IntegerField(db_column='quantity')\n"
+                )],
+                "shop_item",
+                "quantity"
+            ),
+            at(models, 1)
+        );
+        // Payload: a collection field, camelCase of the column.
+        let cars = "src/collections/Cars.ts";
+        assert_eq!(
+            used(
+                "payload",
+                &[(
+                    cars,
+                    "fields: [\n  { name: 'stockCount', type: 'number' },\n]"
+                )],
+                "cars",
+                "stock_count"
+            ),
+            at(cars, 2)
+        );
+        // Drizzle and raw SQL: the column only counts in a file that names its table.
+        let s = "src/db/schema.ts";
+        assert_eq!(
+            used(
+                "drizzle",
+                &[(
+                    s,
+                    "export const users = sqliteTable('users', {\n  legacy: text('legacy'),\n})"
+                )],
+                "users",
+                "legacy"
+            ),
+            at(s, 2)
+        );
+        assert_eq!(
+            used(
+                "drizzle",
+                &[(
+                    s,
+                    "export const posts = sqliteTable('posts', { legacy: text('legacy') })"
+                )],
+                "users",
+                "legacy"
+            ),
+            ColumnUse::NotUsed
+        );
+        let q = "app/queries.py";
+        assert_eq!(
+            used(
+                "wrangler-d1",
+                &[(q, "rows = db.execute('SELECT legacy FROM users')\n")],
+                "users",
+                "legacy"
+            ),
+            at(q, 1)
+        );
+        // A migration's own text never counts, whatever it names.
+        assert_eq!(
+            used(
+                "wrangler-d1",
+                &[(
+                    "migrations/0002_drop.sql",
+                    "ALTER TABLE users DROP COLUMN legacy;"
+                )],
+                "users",
+                "legacy"
+            ),
+            ColumnUse::NotUsed
+        );
+    }
+
+    fn files_of(files: &[(&str, &str)]) -> Vec<(String, String)> {
+        files
+            .iter()
+            .map(|(p, t)| (p.to_string(), t.to_string()))
+            .collect()
     }
 
     #[test]

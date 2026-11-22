@@ -82,6 +82,19 @@ The old version's tests are the primary check, and the schema rules still decide
 clear a schema error, since a suite that only reads a table cannot vouch for a trigger that rejects writes to it. A
 constraint on a column the same change adds, empty in every existing row after the migration, is a note.
 
+A dropped or renamed column the version still serving traffic uses is an error no contract marker can accept
+(MG212): stop using it in one release, drop it in the next. Each migrator's file says how its code names a column, and
+what that cannot see:
+
+| Migrator | The old code uses a column when | It cannot see |
+|---|---|---|
+| Rails | it is not in the model's `ignored_columns` (Rails loads every column) | nothing: it errs toward "used" |
+| Prisma | `schema.prisma` has a field named like it or `@map`ped to it | raw SQL (`$queryRaw`) |
+| Drizzle | a schema file naming the table has it as a string | raw SQL, a column named in another file than its table |
+| Django | `models.py` has the field (a foreign key's without `_id`) or a `db_column` | `extra()`, raw SQL, models outside `models.py` |
+| Payload | a collection or global has the field (camelCase) | nested groups and arrays (their columns carry a prefix) |
+| Wrangler D1, Supabase, dbmate | the app's source has its name in a file that also names its table | SQL built at run time; a name shared with another table can mislead it |
+
 Lost data needs rows to be seen, so set `seed` when the tests delete their own rows. A rebuilt table whose children
 cascade on delete is an error even without rows (MG104) when the tool renames a copy into place, as Drizzle does
 (drizzle-orm#4938); Django rebuilds that way too, but only with foreign keys off, so it is exempt. A tool that drops

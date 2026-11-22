@@ -19,3 +19,8 @@ query = "SELECT name FROM payload_migrations WHERE batch <> -1"
 command = "npx --no payload migrate"
 # Stock `payload migrate` refuses to start without a secret (docs/research/spike-7.md); any value works in a sandbox.
 env = { PAYLOAD_SECRET = "migate-sandbox-secret" }
+
+[references]
+# A collection or global field: Payload names the column after the field (camelCase becomes snake_case).
+files = ["**/collections/**/*.{ts,tsx,js}", "**/globals/**/*.{ts,tsx,js}", "**/payload.config.{ts,js}"]
+patterns = ['''name:\s*["']{field}["']''', '''name:\s*["']{column}["']''']

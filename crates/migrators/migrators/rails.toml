@@ -17,3 +17,10 @@ command = "bin/rails db:migrate"
 # need their own mode, so RAILS_ENV is for the migrate command only.
 env = { SECRET_KEY_BASE_DUMMY = "1" }
 migrate_env = { RAILS_ENV = "production" }
+
+[references]
+# Rails loads every column and caches them; a live version stops using one only when its model lists it in
+# ignored_columns (self.ignored_columns = ["legacy"], += %w[legacy]).
+files = ["app/models/**/*.rb"]
+patterns = ['ignored_columns.*\b{column}\b']
+mode = "unless"

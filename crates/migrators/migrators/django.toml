@@ -25,3 +25,8 @@ query = "SELECT app || '/' || name FROM django_migrations"
 command = "python manage.py migrate"
 # The common production settings read the secret from the environment and refuse to start without it (spike-7).
 env = { DJANGO_SECRET_KEY = "migate-sandbox-secret" }
+
+[references]
+# A model field named like the column (a foreign key's field drops the _id), or one mapped to it with db_column.
+files = ["**/models.py", "**/models/*.py"]
+patterns = ['^\s*{column}\s*=\s*models\.', '^\s*{stem}\s*=\s*models\.(ForeignKey|OneToOneField)', '''db_column\s*=\s*["']{column}["']''']

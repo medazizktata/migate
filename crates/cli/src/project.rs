@@ -27,6 +27,21 @@ pub struct Project {
     pub files: Vec<MigrationFile>,
 }
 
+/// The project's text files at `root`, path (relative, with '/') and contents: what the base version's code says
+/// (MG212). Files over 1 MB or not UTF-8 are left out.
+pub fn source_files(root: &Path) -> Result<Vec<(String, String)>, String> {
+    Ok(git_files(root)?
+        .into_iter()
+        .filter(|rel| {
+            std::fs::metadata(root.join(rel)).is_ok_and(|m| m.is_file() && m.len() <= 1 << 20)
+        })
+        .filter_map(|rel| {
+            let text = std::fs::read_to_string(root.join(&rel)).ok()?;
+            Some((rel, text))
+        })
+        .collect())
+}
+
 pub fn read(root: &Path, migrator: &Migrator) -> Result<Project, String> {
     let mut matched: Vec<String> = git_files(root)?
         .into_iter()
