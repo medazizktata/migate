@@ -20,8 +20,10 @@ command = 'supabase migration up --include-all --db-url "{url}?sslmode=disable"'
 env = {}
 
 [references]
-# Raw SQL in the app's code: the column's name in a file that also names its table (migrations excluded). The weakest
-# rule: a query built at run time, or a name shared with another table, can mislead it either way.
-files = ["**/*.{ts,tsx,js,mjs,cjs,py,rb,go,rs,sql,php,java,kt,cs}"]
+# Raw SQL in the app's code: the column's name with its table's name within 3 lines (a query, a query builder call).
+# Tests, vendored and minified code, and .sql files (schema dumps, probes; migrations never count) are not the code
+# serving traffic. The weakest rule: SQL built at run time, or a name shared with another table, can mislead it.
+files = ["**/*.{ts,tsx,js,mjs,cjs,py,rb,go,rs,php,java,kt,cs}"]
+exclude = ["**/__tests__/**", "**/test/**", "**/tests/**", "**/spec/**", "**/*.{test,spec}.*", "**/*_test.*", "**/vendor/**", "**/*.min.js"]
 patterns = ['\b{column}\b']
-with_table = true
+table_within = 3

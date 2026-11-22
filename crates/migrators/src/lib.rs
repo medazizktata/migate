@@ -148,9 +148,15 @@ struct ReferencesDef {
     /// loads them all and is told to skip one with ignored_columns).
     #[serde(default = "uses")]
     mode: String,
-    /// Count a file only if it also names the table: for raw SQL, where a column's name alone is too common.
+    /// Count a file only if it also names the table: for schema code that declares a table and its columns together.
     #[serde(default)]
     with_table: bool,
+    /// Count a line only if the table's name is within this many lines of it: for raw SQL, where a column's name
+    /// alone is too common and one large file names many tables.
+    table_within: Option<usize>,
+    /// Files that are not the code serving traffic (tests, vendored libraries), as globs; they never count.
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 fn uses() -> String {
@@ -179,7 +185,7 @@ pub struct Migrator {
     /// The tool rebuilds a table only with foreign keys really off, so a rebuild cannot cascade (MG104 stays quiet).
     pub foreign_keys_off_for_rebuilds: bool,
     pattern: Regex,
-    references: Option<(Vec<Regex>, ReferencesDef)>,
+    references: Option<(Vec<Regex>, Vec<Regex>, ReferencesDef)>,
     /// The one folder (relative to the project, no trailing `/`) whose files count, when the project names it.
     dir: Option<String>,
     journal: Option<Journal>,
@@ -236,17 +242,16 @@ impl Migrator {
             }
             None => None,
         };
+        let globs = |list: &[String]| -> Result<Vec<Regex>, Error> {
+            list.iter()
+                .map(|g| {
+                    Regex::new(&glob_regex(g))
+                        .map_err(|e| Error(format!("{}: references glob {g}: {e}", d.id)))
+                })
+                .collect()
+        };
         let references = match d.references {
-            Some(r) => Some((
-                r.files
-                    .iter()
-                    .map(|g| {
-                        Regex::new(&glob_regex(g))
-                            .map_err(|e| Error(format!("{}: references.files {g}: {e}", d.id)))
-                    })
-                    .collect::<Result<_, _>>()?,
-                r,
-            )),
+            Some(r) => Some((globs(&r.files)?, globs(&r.exclude)?, r)),
             None => None,
         };
         let level = |field: &str, value: &str| match value {
@@ -310,7 +315,7 @@ impl Migrator {
 
     /// What the base version's code (`files`: path and text, relative to the project) says about `table.column`.
     pub fn column_use(&self, files: &[(String, String)], table: &str, column: &str) -> ColumnUse {
-        let Some((globs, def)) = &self.references else {
+        let Some((globs, excluded, def)) = &self.references else {
             return ColumnUse::Unknown;
         };
         let fill = |p: &str| {
@@ -338,14 +343,23 @@ impl Migrator {
         .expect("an escaped name is a valid pattern");
         let mut hits = Vec::new();
         for (path, text) in files {
-            if !globs.iter().any(|g| g.is_match(path)) || self.pattern.is_match(path) {
+            if !globs.iter().any(|g| g.is_match(path))
+                || excluded.iter().any(|g| g.is_match(path))
+                || self.pattern.is_match(path)
+            {
                 continue;
             }
             if def.with_table && !names_table.is_match(text) {
                 continue;
             }
-            for (n, line) in text.lines().enumerate() {
-                if patterns.iter().any(|p| p.is_match(line)) {
+            let lines: Vec<&str> = text.lines().collect();
+            for (n, line) in lines.iter().enumerate() {
+                let near = |w: usize| {
+                    lines[n.saturating_sub(w)..(n + w + 1).min(lines.len())]
+                        .iter()
+                        .any(|l| names_table.is_match(l))
+                };
+                if patterns.iter().any(|p| p.is_match(line)) && def.table_within.is_none_or(near) {
                     hits.push((path.clone(), u32::try_from(n + 1).unwrap_or(u32::MAX)));
                 }
             }
@@ -802,6 +816,32 @@ mod tests {
                 "legacy"
             ),
             at(q, 1)
+        );
+        // Raw SQL: tests, schema dumps and a table named far away are not the code serving traffic.
+        let test = "apps/server/__tests__/users.test.ts";
+        assert_eq!(
+            used(
+                "wrangler-d1",
+                &[(test, "await db.execute('SELECT legacy FROM users')")],
+                "users",
+                "legacy"
+            ),
+            ColumnUse::NotUsed
+        );
+        let dump = "db/schema/10-objects.sql";
+        assert_eq!(
+            used(
+                "wrangler-d1",
+                &[(dump, "CREATE TABLE users (legacy text);")],
+                "users",
+                "legacy"
+            ),
+            ColumnUse::NotUsed
+        );
+        let far = format!("const t = 'users';\n{}const legacy = 1;\n", "\n".repeat(10));
+        assert_eq!(
+            used("wrangler-d1", &[(q, far.as_str())], "users", "legacy"),
+            ColumnUse::NotUsed
         );
         // A migration's own text never counts, whatever it names.
         assert_eq!(
