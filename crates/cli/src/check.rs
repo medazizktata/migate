@@ -16,7 +16,7 @@ use crate::{config, ledger_file, project};
 
 #[derive(Debug, Args)]
 pub struct Common {
-    /// Migration tool: payload, prisma, drizzle, wrangler-d1, rails, django, supabase (or `migrator` in migate.toml)
+    /// Migration tool: payload, prisma, drizzle, wrangler-d1, rails, django, supabase, dbmate (or `migrator` in migate.toml)
     #[arg(long)]
     pub migrator: Option<String>,
     /// Project directory
@@ -99,6 +99,10 @@ fn settings(c: &Common, base_flag: Option<&String>) -> Result<Settings, String> 
                         ));
                     }
                 });
+            }
+            if let Some(query) = &file.history_query {
+                m.history.query = query.clone();
+                m.history.postgres = None;
             }
             m
         },

@@ -5,6 +5,7 @@
 //! ledger = "db/migate-ledger.json"            # relative to the project directory
 //! base = "origin/main"
 //! out_of_order = "block"                    # optional: the project's runner refuses migrations older than the last
+//! history_query = "SELECT version FROM dbmate.schema_migrations"   # optional: where the project keeps its history
 //!
 //! # Optional: migrate a throwaway SQLite database at base and at head, diff the schemas, run the base version's tests.
 //! [sandbox]
@@ -38,6 +39,9 @@ pub struct Config {
     pub base: Option<String>,
     /// Overrides the migrator's out-of-order policy (block, warn or allow) when the project's own runner differs.
     pub out_of_order: Option<String>,
+    /// Overrides the migrator's history query when the project keeps the history elsewhere (dbmate's
+    /// `--migrations-table`, a renamed table): one row per applied migration, as the migrator records it.
+    pub history_query: Option<String>,
     pub sandbox: Option<Sandbox>,
 }
 

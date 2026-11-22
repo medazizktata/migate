@@ -949,6 +949,36 @@ fn rollback_repo(wrote: Option<&str>) -> Repo {
 }
 
 #[test]
+fn a_project_names_where_it_keeps_its_history() {
+    // As dbmate's --migrations-table: the history lives in a table the migrator's file does not name.
+    let r = Repo::new();
+    r.write("migate.toml", SANDBOX_TOML);
+    r.write(
+        "apply.py",
+        &APPLY.replace("d1_migrations", "release_history"),
+    );
+    r.write("old_app.py", OLD_APP);
+    r.write("migrations/0001_init.sql", INIT);
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write(
+        "migrations/0002_change.sql",
+        "ALTER TABLE users ADD COLUMN nickname TEXT;",
+    );
+    r.commit("change");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 3, "the migrator's own table is not there: {out}{err}");
+    assert!(err.contains("MG804"), "{err}");
+    r.write(
+        "migate.toml",
+        &format!("history_query = \"SELECT name FROM release_history\"\n{SANDBOX_TOML}"),
+    );
+    r.commit("say where");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+}
+
+#[test]
 fn rows_the_new_version_writes_that_the_old_cannot_read_are_an_error() {
     let (code, out, err) = sandbox_check(&rollback_repo(Some("archived")), &[]);
     assert_eq!(code, 2, "{out}{err}");

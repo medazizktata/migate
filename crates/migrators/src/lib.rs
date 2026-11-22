@@ -17,6 +17,7 @@ const BUNDLED: &[(&str, &str)] = &[
     ("rails", include_str!("../migrators/rails.toml")),
     ("django", include_str!("../migrators/django.toml")),
     ("supabase", include_str!("../migrators/supabase.toml")),
+    ("dbmate", include_str!("../migrators/dbmate.toml")),
 ];
 
 #[derive(Debug)]
@@ -476,6 +477,7 @@ mod tests {
                 "rails",
                 "django",
                 "supabase",
+                "dbmate",
             ]
         );
         for (name, _) in BUNDLED {

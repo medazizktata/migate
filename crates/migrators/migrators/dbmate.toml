@@ -1,0 +1,18 @@
+id = "dbmate"
+name = "dbmate"
+# Files: <migrations dir>/<version>_<name>.sql, each with a `-- migrate:up` and a `-- migrate:down` section; the
+# history table (schema_migrations, or the project's --migrations-table, set with history_query in migate.toml) stores
+# the version.
+path_pattern = '(?:^|/)migrations/(?P<id>(?P<version>\d+)_[^/]+)\.sql$'
+order = "timestamp-prefix"
+# `dbmate up` applies every pending migration, an older one included, unless run with --strict.
+out_of_order = "warn"
+checksum = "none"
+
+[history]
+kind = "full"
+query = "SELECT version FROM schema_migrations"
+
+[migrate]
+command = 'dbmate --url "{url}?sslmode=disable" up'
+env = {}
