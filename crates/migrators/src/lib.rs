@@ -1106,6 +1106,17 @@ mod tests {
         assert_eq!(got[1].id, "shop.0002_add_a");
         assert_eq!(got[1].parents, ["shop/0001_initial"]);
         assert_eq!(check(m.policy(), &got, &[]), vec![]);
+        // The word in a comment or a docstring before the class is not the list (seen in a real project).
+        let commented = format!(
+            "# Note: this has a couple dependencies on the codebase\nROOTS = {{'a': ROOT['a']}}\n{D2A}"
+        );
+        let got = m
+            .migrations(&files(&[
+                ("shop/migrations/0001_initial.py", D1),
+                ("shop/migrations/0002_add_a.py", &commented),
+            ]))
+            .unwrap();
+        assert_eq!(got[1].parents, ["shop/0001_initial"]);
     }
 
     #[test]
