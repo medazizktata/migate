@@ -277,6 +277,16 @@ fn found_any(project: &project::Project, s: &Settings) -> Result<(), String> {
     if !project.migrations.is_empty() {
         return Ok(());
     }
+    let dirs = project::migration_dirs(&s.root, &s.migrator)?;
+    if !dirs.is_empty() {
+        return Err(format!(
+            "no {} migrations found in {}, so nothing was checked; this migrator's files are in {}: set migrations_dir \
+             in migate.toml to the one this check is for",
+            s.migrator.id,
+            s.root.display(),
+            dirs.join(", ")
+        ));
+    }
     let fitting: Vec<String> = migate_migrators::bundled()
         .map_err(|e| e.to_string())?
         .into_iter()

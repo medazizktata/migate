@@ -346,6 +346,7 @@ impl Migrator {
             if !globs.iter().any(|g| g.is_match(path))
                 || excluded.iter().any(|g| g.is_match(path))
                 || self.pattern.is_match(path)
+                || self.matches(path)
             {
                 continue;
             }
@@ -384,7 +385,26 @@ impl Migrator {
 
     /// Whether a project file (path relative to the project, with '/') is one this migrator reads.
     pub fn matches(&self, path: &str) -> bool {
-        self.in_dir(path) && self.pattern.is_match(path)
+        self.captures(path).is_some()
+    }
+
+    /// The pattern's id, version and group for a file this migrator reads: from its own path, or, under
+    /// `migrations_dir`, as if that folder were the tool's `migrations/`, so a set kept in a folder of another name
+    /// (one per database adapter: `src/migrations/postgres`) is read too.
+    fn captures(&self, path: &str) -> Option<(String, String, String)> {
+        if !self.in_dir(path) {
+            return None;
+        }
+        let read = |p: &str| {
+            self.pattern.captures(p).map(|c| {
+                let part = |name: &str| c.name(name).map_or("", |m| m.as_str()).to_string();
+                (part("id"), part("version"), part("group"))
+            })
+        };
+        read(path).or_else(|| {
+            let rest = path.strip_prefix(self.dir.as_deref()?)?.strip_prefix('/')?;
+            read(&format!("migrations/{rest}"))
+        })
     }
 
     /// The project's migrations, from `(path relative to the project with '/', contents)` pairs. Files the pattern
@@ -405,15 +425,12 @@ impl Migrator {
     ) -> Result<Vec<(Migration, String)>, Error> {
         let mut out = Vec::new();
         for (path, text) in files {
-            let Some(caps) = self.pattern.captures(path).filter(|_| self.in_dir(path)) else {
+            let Some((id, version, group)) = self.captures(path) else {
                 continue;
             };
             match &self.journal {
                 Some(journal) => out.extend(journal_entries(path, text, journal)?),
                 None => {
-                    let id = &caps["id"];
-                    let version = &caps["version"];
-                    let group = caps.name("group").map_or("", |g| g.as_str());
                     let parents = self
                         .graph
                         .as_ref()
@@ -424,8 +441,8 @@ impl Migrator {
                         } else {
                             format!("{group}.{id}")
                         },
-                        version: version.to_string(),
-                        group: group.to_string(),
+                        version,
+                        group,
                         parents,
                     };
                     out.push((migration, path.clone()));
@@ -923,6 +940,8 @@ mod tests {
         let m = get("payload").unwrap().unwrap();
         let got = m
             .migrations(&files(&[
+                ("src/migrations/20261117_101500.ts", ""),
+                ("src/migrations/20261117_101500.json", ""),
                 ("src/migrations/20261118_232700_init.ts", ""),
                 ("src/migrations/20261119_080000_add_v2.ts", ""),
                 ("src/migrations/index.ts", ""),
@@ -932,9 +951,11 @@ mod tests {
             .iter()
             .map(|g| (g.id.as_str(), g.version.as_str()))
             .collect();
+        // `payload migrate:create` without a name writes the timestamp alone (seen on real projects).
         assert_eq!(
             ids,
             [
+                ("20261117_101500", "20261117_101500"),
                 ("20261118_232700_init", "20261118_232700"),
                 ("20261119_080000_add_v2", "20261119_080000")
             ]
@@ -951,9 +972,38 @@ mod tests {
             vec![("MG004", Severity::Warning)]
         );
         assert_eq!(
-            check(m.policy(), &got, &ran(&["20261118_232700_init"])),
+            check(
+                m.policy(),
+                &got,
+                &ran(&["20261117_101500", "20261118_232700_init"])
+            ),
             vec![]
         );
+    }
+
+    #[test]
+    fn migrations_dir_reads_a_set_in_a_folder_of_another_name() {
+        // Seen on a real Payload project: one set per database adapter, each in its own folder under `migrations/`.
+        let mut m = get("payload").unwrap().unwrap();
+        let sets = files(&[
+            ("src/migrations/postgres/20241008_105308.ts", ""),
+            ("src/migrations/postgres/index.ts", ""),
+            ("src/migrations/mongodb/20250128_074922_migration.ts", ""),
+        ]);
+        assert!(
+            m.migrations(&sets).unwrap().is_empty(),
+            "no set is under a folder named migrations"
+        );
+        m.set_migrations_dir("src/migrations/postgres");
+        let ids: Vec<String> = m
+            .migrations(&sets)
+            .unwrap()
+            .into_iter()
+            .map(|g| g.id)
+            .collect();
+        assert_eq!(ids, ["20241008_105308"]);
+        assert!(m.matches("src/migrations/postgres/20241008_105308.ts"));
+        assert!(!m.matches("src/migrations/mongodb/20250128_074922_migration.ts"));
     }
 
     #[test]

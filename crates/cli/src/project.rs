@@ -75,6 +75,29 @@ pub fn read(root: &Path, migrator: &Migrator) -> Result<Project, String> {
     })
 }
 
+/// Folders that would hold this migrator's migrations as `migrations_dir`: a project with one set per database keeps
+/// each in a folder of its own, which the migrator's layout alone does not find.
+pub fn migration_dirs(root: &Path, migrator: &Migrator) -> Result<Vec<String>, String> {
+    let files: Vec<String> = git_files(root)?
+        .into_iter()
+        .filter(|rel| !rel.split('/').any(skipped))
+        .collect();
+    let folders: std::collections::BTreeSet<&str> = files
+        .iter()
+        .filter_map(|f| f.rsplit_once('/').map(|(dir, _)| dir))
+        .filter(|dir| dir.split('/').any(|part| part.contains("migration")))
+        .collect();
+    Ok(folders
+        .into_iter()
+        .filter(|dir| {
+            let mut m = migrator.clone();
+            m.set_migrations_dir(dir);
+            files.iter().any(|f| m.matches(f))
+        })
+        .map(String::from)
+        .collect())
+}
+
 /// The migrations at a git revision (the base branch), read from git without a checkout.
 pub fn migrations_at(
     root: &Path,

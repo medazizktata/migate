@@ -436,6 +436,41 @@ fn the_config_file_supplies_the_settings_and_flags_win() {
 }
 
 #[test]
+fn a_set_in_a_folder_of_its_own_is_named_and_selected_with_migrations_dir() {
+    // One migration set per database adapter, as a real Payload project keeps them.
+    let r = Repo::new();
+    r.write(
+        "src/migrations/postgres/20241008_105308.ts",
+        "export async function up() {}\n",
+    );
+    r.write(
+        "src/migrations/postgres/index.ts",
+        "export const migrations = []\n",
+    );
+    r.write(
+        "src/migrations/mongodb/20250128_074922_migration.ts",
+        "export async function up() {}\n",
+    );
+    r.commit("two sets");
+    let out = r.migate(&["check", "--migrator", "payload", "--base", "main"]);
+    assert_eq!(out.status.code(), Some(3));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("src/migrations/mongodb, src/migrations/postgres")
+            && err.contains("set migrations_dir"),
+        "{err}"
+    );
+    r.write(
+        "migate.toml",
+        "migrator = \"payload\"\nbase = \"main\"\nmigrations_dir = \"src/migrations/postgres\"\n",
+    );
+    let out = r.migate(&["check"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("in 1 migration(s)"), "{text}");
+}
+
+#[test]
 fn no_migrator_anywhere_is_exit_3() {
     let r = Repo::new();
     let out = r.migate(&["check", "--base", "main"]);
