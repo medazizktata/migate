@@ -41,10 +41,11 @@ One document per run, named by its date.
 | 10 | 2026-11-21 | migate history on real migrators' history tables | `2026-11-21-history-on-real-tools.md` |
 | 11 | 2026-11-21 | Dogfood 5 | `2026-11-21-dogfood-5.md` |
 | 12 | 2026-11-22 | Rollback readback on the origin project | `2026-11-22-rollback-readback.md` |
+| 13 | 2026-11-22 to 23 | Dogfood 6: twelve profiles, real PostgreSQL projects, two open-source projects, blind labels | `2026-11-23-dogfood-6.md` |
 
 ## Not covered yet
 
-- A real PostgreSQL project with real history (only minimal sample apps so far).
+- A real PostgreSQL project's own test suite (dogfood 6 ran real PostgreSQL projects, but none with runnable tests).
 - MG002, MG003, MG007 end to end, MG105 by a table rebuild, MG801 and MG805, and a project's own contract-marker
   convention.
 - One-off statements (`ALTER TABLE ... DROP COLUMN` and the like) inside TypeScript, Python or Ruby migrations, for the
