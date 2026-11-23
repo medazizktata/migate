@@ -5,7 +5,18 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# The pinned toolchain (rust-toolchain.toml) is the one CI runs. A cargo outside rustup (a system or Homebrew one)
+# ignores the pin, so its clippy can pass what CI's fails: prefer rustup's cargo then, and refuse any other version.
+pinned=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+version() { "$1" --version 2>/dev/null | awk '{print $2}'; }
+if [ -z "${CARGO:-}" ] && [ "$(version cargo)" != "$pinned" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
+  CARGO=$HOME/.cargo/bin/cargo
+fi
 cargo=${CARGO:-cargo}
+if [ "$(version "$cargo")" != "$pinned" ]; then
+  echo "check: $cargo is $(version "$cargo"), but rust-toolchain.toml pins $pinned: install it with rustup, or set CARGO" >&2
+  exit 1
+fi
 failed=() missing=() passed=()
 
 step() { # step <name> <tool-to-require> <command...>
