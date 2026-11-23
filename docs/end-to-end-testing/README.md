@@ -42,6 +42,7 @@ One document per run, named by its date.
 | 11 | 2026-11-21 | Dogfood 5 | `2026-11-21-dogfood-5.md` |
 | 12 | 2026-11-22 | Rollback readback on the origin project | `2026-11-22-rollback-readback.md` |
 | 13 | 2026-11-22 to 23 | Dogfood 6: twelve profiles, real PostgreSQL projects, two open-source projects, blind labels | `2026-11-23-dogfood-6.md` |
+| 14 | 2026-11-23 | Static checks over five open-source projects' migration history | `2026-11-23-static-history-sweep.md` |
 
 ## Not covered yet
 
