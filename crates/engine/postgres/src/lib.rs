@@ -805,7 +805,8 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
          (select json_agg(a.attname order by k.i) from unnest(con.confkey) with ordinality k(num, i) \
           join pg_attribute a on a.attrelid = con.confrelid and a.attnum = k.num) as ref_cols, \
          con.confdeltype as on_delete, con.confupdtype as on_update, \
-         con.condeferrable as deferrable, con.condeferred as deferred \
+         con.condeferrable as deferrable, con.condeferred as deferred, \
+         (select (to_jsonb(ix) ->> 'indnullsnotdistinct')::boolean from pg_index ix where ix.indexrelid = con.conindid) as nnd \
          from pg_constraint con join pg_class c on c.oid = con.conrelid \
          join pg_namespace n on n.oid = c.relnamespace \
          left join pg_class rc on rc.oid = con.confrelid left join pg_namespace rn on rn.oid = rc.relnamespace \
@@ -818,6 +819,7 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
             },
             "u" => Detail::Unique {
                 columns: names(&r, "cols"),
+                nulls_not_distinct: r["nnd"].as_bool().unwrap_or(false),
             },
             "c" => Detail::Check {
                 expression: check_expression(s(&r, "def")),
@@ -840,6 +842,7 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
 
     for r in q(format!(
         "select n.nspname as ns, c.relname as tbl, i.relname as name, x.indisunique as uniq, am.amname as method, \
+         (to_jsonb(x) ->> 'indnullsnotdistinct')::boolean as nnd, \
          pg_get_expr(x.indpred, x.indrelid, true) as predicate, \
          (select json_agg(json_build_object('col', a.attname, \
             'expr', case when k.num = 0 then pg_get_indexdef(x.indexrelid, k.i::int, true) end, \
@@ -882,6 +885,7 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
                 parts,
                 predicate: opt(&r, "predicate"),
                 method: opt(&r, "method"),
+                nulls_not_distinct: r["nnd"].as_bool().unwrap_or(false),
             }),
         ));
     }

@@ -172,6 +172,9 @@ pub struct Index {
     /// The access method where the engine has several (e.g. `btree`, `gin`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,
+    /// PostgreSQL `NULLS NOT DISTINCT`: two NULLs collide.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub nulls_not_distinct: bool,
 }
 
 /// What an object is, tagged by `kind` in JSON.
@@ -194,6 +197,9 @@ pub enum Detail {
     },
     Unique {
         columns: Vec<String>,
+        /// PostgreSQL `NULLS NOT DISTINCT`: two NULLs collide.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        nulls_not_distinct: bool,
     },
     Check {
         expression: String,

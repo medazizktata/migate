@@ -148,7 +148,7 @@ fn tables_constraints_and_keys() {
     ));
     assert!(
         matches!(&get(&s, Kind::Unique, Some("users"), "users_email_key").detail,
-        Detail::Unique { columns } if columns == &["email"])
+        Detail::Unique { columns, .. } if columns == &["email"])
     );
     assert!(
         matches!(&get(&s, Kind::Check, Some("users"), "email_present").detail,

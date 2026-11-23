@@ -86,7 +86,8 @@ pub fn classify_with(changes: &[Change], filled: &BTreeSet<String>) -> Vec<Findi
         })
         .collect();
     // Columns this change adds that start empty (no default, not generated, not identity): every existing row holds
-    // NULL there and no old code writes them, so a reference or UNIQUE on them alone cannot fail or break anything.
+    // NULL there and no old code writes them, so a reference on them alone, or a UNIQUE on any of them, cannot fail or
+    // break anything.
     let empty_new: BTreeSet<(&str, &str, &str)> = changes
         .iter()
         .filter_map(|c| match c {
@@ -169,11 +170,15 @@ pub fn classify_with(changes: &[Change], filled: &BTreeSet<String>) -> Vec<Findi
             }
         }
         if let (Change::Added(o), Some(table)) = (change, o.parent.as_deref())
-            && constrained_columns(o).is_some_and(|cols| {
+            && constrained_columns(o).is_some_and(|(cols, one_enough)| {
+                let empty =
+                    |c: &String| empty_new.contains(&(o.namespace.as_str(), table, c.as_str()));
                 !cols.is_empty()
-                    && cols
-                        .iter()
-                        .all(|c| empty_new.contains(&(o.namespace.as_str(), table, c.as_str())))
+                    && if one_enough {
+                        cols.iter().any(empty)
+                    } else {
+                        cols.iter().all(empty)
+                    }
             })
         {
             for f in &mut out[start..] {
@@ -186,20 +191,26 @@ pub fn classify_with(changes: &[Change], filled: &BTreeSet<String>) -> Vec<Findi
     out
 }
 
-/// The plain columns a foreign key, UNIQUE or unique index constrains; `None` for anything else (a primary key forces
-/// NOT NULL, which existing rows fail; an expression or CHECK reads columns we cannot list).
-fn constrained_columns(o: &Object) -> Option<Vec<String>> {
+/// The plain columns a foreign key, UNIQUE or unique index constrains, and whether one NULL column among them is
+/// enough to keep a row clear of it: a NULL never collides in a UNIQUE, but a foreign key `MATCH FULL` rejects a partly
+/// NULL key. `None` for anything else (a primary key forces NOT NULL, which existing rows fail; an expression or CHECK
+/// reads columns we cannot list; with `NULLS NOT DISTINCT` two NULLs collide).
+fn constrained_columns(o: &Object) -> Option<(Vec<String>, bool)> {
     match &o.detail {
-        Detail::ForeignKey(fk) => Some(fk.columns.clone()),
-        Detail::Unique { columns } => Some(columns.clone()),
-        Detail::Index(i) if i.unique => i
+        Detail::ForeignKey(fk) => Some((fk.columns.clone(), false)),
+        Detail::Unique {
+            columns,
+            nulls_not_distinct: false,
+        } => Some((columns.clone(), true)),
+        Detail::Index(i) if i.unique && !i.nulls_not_distinct => i
             .parts
             .iter()
             .map(|p| match p {
                 crate::schema::IndexPart::Column { name, .. } => Some(name.clone()),
                 crate::schema::IndexPart::Expression { .. } => None,
             })
-            .collect(),
+            .collect::<Option<Vec<_>>>()
+            .map(|cols| (cols, true)),
         _ => None,
     }
 }
@@ -236,7 +247,7 @@ fn added(o: &Object, emit: &mut impl FnMut(&'static str, String)) {
             "MG305",
             format!("primary key added on ({})", columns.join(", ")),
         ),
-        Detail::Unique { columns } => {
+        Detail::Unique { columns, .. } => {
             emit("MG302", format!("UNIQUE added on ({})", columns.join(", ")))
         }
         Detail::Index(i) if i.unique => emit("MG302", "unique index added".into()),
@@ -552,6 +563,7 @@ mod tests {
                 .collect(),
             predicate: None,
             method: None,
+            nulls_not_distinct: false,
         })
     }
 
@@ -659,6 +671,7 @@ mod tests {
                 "t_a_key",
                 Detail::Unique {
                     columns: c.iter().map(|s| (*s).into()).collect(),
+                    nulls_not_distinct: false,
                 },
             )
         };
@@ -794,6 +807,7 @@ mod tests {
                         "t_a_key",
                         Detail::Unique {
                             columns: vec!["a".into()],
+                            nulls_not_distinct: false,
                         },
                     ),
                 ),
@@ -1071,6 +1085,7 @@ mod tests {
             "t_owner_key",
             Detail::Unique {
                 columns: vec!["owner".into()],
+                nulls_not_distinct: false,
             },
         ));
         head.push(on_t("t_owner_idx", index(true, &["owner"])));
@@ -1094,6 +1109,35 @@ mod tests {
         assert_eq!(
             found(with(base.clone(), fk_on("a"))),
             [("MG303", Severity::Error)]
+        );
+        // A UNIQUE over an existing column and a new, empty one: every row holds NULL in the new one, so none collide.
+        let mut head = with(base.clone(), column("owner", 2, text(), true, None));
+        head.push(on_t("t_a_owner_idx", index(true, &["a", "owner"])));
+        assert_eq!(
+            found(head),
+            [("MG210", Severity::Note), ("MG302", Severity::Note)]
+        );
+        // A foreign key over the same pair stays an error: MATCH FULL rejects a partly NULL key.
+        let mut head = with(base.clone(), column("owner", 2, text(), true, None));
+        let mut pair = fk_on("owner");
+        if let Detail::ForeignKey(f) = &mut pair.detail {
+            f.columns = vec!["a".into(), "owner".into()];
+        }
+        head.push(pair);
+        assert_eq!(
+            found(head),
+            [("MG210", Severity::Note), ("MG303", Severity::Error)]
+        );
+        // With NULLS NOT DISTINCT two NULLs collide: a UNIQUE on a new, empty column stays an error.
+        let mut head = with(base.clone(), column("owner", 2, text(), true, None));
+        let mut strict = on_t("t_owner_idx", index(true, &["owner"]));
+        if let Detail::Index(i) = &mut strict.detail {
+            i.nulls_not_distinct = true;
+        }
+        head.push(strict);
+        assert_eq!(
+            found(head),
+            [("MG210", Severity::Note), ("MG302", Severity::Error)]
         );
     }
 

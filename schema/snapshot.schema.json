@@ -308,6 +308,10 @@
             "kind": {
               "type": "string",
               "const": "unique"
+            },
+            "nulls_not_distinct": {
+              "description": "PostgreSQL `NULLS NOT DISTINCT`: two NULLs collide.",
+              "type": "boolean"
             }
           },
           "required": [
@@ -406,6 +410,10 @@
                 "string",
                 "null"
               ]
+            },
+            "nulls_not_distinct": {
+              "description": "PostgreSQL `NULLS NOT DISTINCT`: two NULLs collide.",
+              "type": "boolean"
             },
             "parts": {
               "type": "array",

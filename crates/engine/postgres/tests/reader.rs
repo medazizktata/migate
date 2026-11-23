@@ -74,6 +74,8 @@ create table shop.orders (
 alter table shop.orders add constraint orders_total_check check (total >= 0) not valid;
 alter table shop.orders add constraint orders_user_strict foreign key (user_id) references shop.users (id) not valid;
 create index orders_note_lower on shop.orders (lower(note) desc, id) where note is not null;
+create unique index orders_note_strict on shop.orders (note) nulls not distinct;
+alter table shop.orders add constraint orders_id_note_strict unique nulls not distinct (id, note);
 create view shop.big_orders as select id, total from shop.orders where total > 100;
 create materialized view shop.order_totals as select user_id, sum(total) as s from shop.orders group by user_id;
 create function shop.touch() returns trigger language plpgsql as $$ begin new.note := coalesce(new.note, ''); return new; end $$;
@@ -147,8 +149,19 @@ fn every_kind_is_read_from_a_real_server() {
     );
     assert!(
         matches!(&get(&s, Kind::Unique, Some("users"), "users_email_key").detail,
-        Detail::Unique { columns } if columns == &["email"])
+        Detail::Unique { columns, nulls_not_distinct: false } if columns == &["email"])
     );
+    assert!(matches!(
+        &get(&s, Kind::Unique, Some("orders"), "orders_id_note_strict").detail,
+        Detail::Unique {
+            nulls_not_distinct: true,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &get(&s, Kind::Index, Some("orders"), "orders_note_strict").detail,
+        Detail::Index(i) if i.unique && i.nulls_not_distinct
+    ));
     match &get(&s, Kind::Check, Some("orders"), "orders_total_check").detail {
         Detail::Check {
             expression,

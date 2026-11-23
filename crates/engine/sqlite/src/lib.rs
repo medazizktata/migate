@@ -579,7 +579,10 @@ fn read_table(
                     namespace: ns.into(),
                     name: format!("{table}_{}_key", columns.join("_")),
                     parent: parent.clone(),
-                    detail: Detail::Unique { columns },
+                    detail: Detail::Unique {
+                        columns,
+                        nulls_not_distinct: false,
+                    },
                 });
             }
             "c" => {
@@ -615,6 +618,7 @@ fn read_table(
                         parts,
                         predicate: if partial { predicate } else { None },
                         method: None,
+                        nulls_not_distinct: false,
                     }),
                 });
             }
