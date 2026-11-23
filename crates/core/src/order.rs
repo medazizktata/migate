@@ -77,8 +77,15 @@ pub struct Policy {
     pub duplicate_versions: OutOfOrder,
 }
 
-/// `repo`: every migration in the pull request. `applied`: the versions production ran (`group/version` for graphs).
-pub fn check(policy: Policy, repo: &[Migration], applied: &[String]) -> Vec<Finding> {
+/// A migration production ran: its id where known (the ledger, the base branch), and its version then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ran {
+    pub id: Option<String>,
+    pub version: String,
+}
+
+/// `repo`: every migration in the pull request. `applied`: what production ran (`group/version` for graphs).
+pub fn check(policy: Policy, repo: &[Migration], applied: &[Ran]) -> Vec<Finding> {
     let mut findings = duplicates(policy.duplicate_versions, repo);
     match policy.model {
         OrderModel::Graph => findings.extend(graph(repo)),
@@ -135,16 +142,25 @@ fn compare(model: OrderModel, a: &str, b: &str) -> Ordering {
     }
 }
 
-fn linear(
-    policy: Policy,
-    model: OrderModel,
-    repo: &[Migration],
-    applied: &[String],
-) -> Vec<Finding> {
-    let Some(last) = applied.iter().max_by(|a, b| compare(model, a, b)) else {
+fn linear(policy: Policy, model: OrderModel, repo: &[Migration], applied: &[Ran]) -> Vec<Finding> {
+    let Some(last) = applied
+        .iter()
+        .map(|r| r.version.as_str())
+        .max_by(|a, b| compare(model, a, b))
+    else {
         return Vec::new(); // nothing ran yet: nothing can be out of order
     };
-    let ran: BTreeSet<&str> = applied.iter().map(String::as_str).collect();
+    let in_repo: BTreeSet<&str> = repo.iter().map(|m| m.id.as_str()).collect();
+    let ran_ids: BTreeSet<&str> = applied.iter().filter_map(|r| r.id.as_deref()).collect();
+    // A version production ran stays taken only while no migration still in the repo answers for it: with that one
+    // gone (a renamed file) or unknown (a history of versions alone), a migration holding the version is the one that
+    // ran. While it remains, under a new version (an edited journal timestamp), the newcomer holding the old version
+    // is new, and production's record of the old one makes the migrator skip it.
+    let taken: BTreeSet<&str> = applied
+        .iter()
+        .filter(|r| r.id.as_deref().is_none_or(|id| !in_repo.contains(id)))
+        .map(|r| r.version.as_str())
+        .collect();
     let (severity, why) = if policy.silent_skip || model == OrderModel::SingleVersion {
         (
             Some(Severity::Error),
@@ -166,16 +182,27 @@ fn linear(
     let Some(severity) = severity else {
         return Vec::new();
     };
+    // A migrator that skips silently runs only what sorts after the last one it ran, so an equal version is skipped too.
+    let skipped = |m: &Migration| match compare(model, &m.version, last) {
+        Ordering::Less => true,
+        Ordering::Equal => policy.silent_skip || model == OrderModel::SingleVersion,
+        Ordering::Greater => false,
+    };
     // History tables store either the version (Rails) or the full migration name (Payload, Prisma, Wrangler).
     repo.iter()
-        .filter(|m| !ran.contains(m.version.as_str()) && !ran.contains(m.id.as_str()))
-        .filter(|m| compare(model, &m.version, last) == Ordering::Less)
+        .filter(|m| !ran_ids.contains(m.id.as_str()) && !taken.contains(m.version.as_str()))
+        .filter(|m| skipped(m))
         .map(|m| {
+            let place = if m.version == last {
+                "has the same version as"
+            } else {
+                "sorts before"
+            };
             Finding::new(
                 "MG004",
                 severity,
                 &m.id,
-                format!("pending, but sorts before {last}, the last one production ran: {why}"),
+                format!("pending, but {place} {last}, the last one production ran: {why}"),
             )
         })
         .collect()
@@ -240,8 +267,24 @@ mod tests {
         versions.iter().map(|v| Migration::linear(*v, *v)).collect()
     }
 
-    fn ran(versions: &[&str]) -> Vec<String> {
-        versions.iter().map(|v| v.to_string()).collect()
+    fn ran(versions: &[&str]) -> Vec<Ran> {
+        versions
+            .iter()
+            .map(|v| Ran {
+                id: None,
+                version: v.to_string(),
+            })
+            .collect()
+    }
+
+    /// Recorded by name, as the ledger and history tables storing names do; the version is unknown, so the name.
+    fn ran_named(ids: &[&str]) -> Vec<Ran> {
+        ids.iter()
+            .map(|id| Ran {
+                id: Some(id.to_string()),
+                version: id.to_string(),
+            })
+            .collect()
     }
 
     const WARN: Policy = Policy {
@@ -350,11 +393,52 @@ mod tests {
     }
 
     #[test]
+    fn a_newcomer_taking_the_version_an_applied_one_left_is_skipped() {
+        // Seen on a real Drizzle project: the journal time of an applied migration was moved earlier, and the new one
+        // took its old time. Production records that time, and runs only what comes after it.
+        let skips = Policy {
+            model: OrderModel::Numeric,
+            out_of_order: OutOfOrder::Block,
+            silent_skip: true,
+            duplicate_versions: OutOfOrder::Block,
+        };
+        let applied = vec![
+            Ran {
+                id: Some("0076_a".into()),
+                version: "1782000000000".into(),
+            },
+            Ran {
+                id: Some("0077_b".into()),
+                version: "1782994900937".into(),
+            },
+        ];
+        let head = vec![
+            Migration::linear("0076_a", "1782000000000"),
+            Migration::linear("0077_b", "1782504784306"),
+            Migration::linear("0078_c", "1782994900937"),
+        ];
+        let f = check(skips, &head, &applied);
+        assert_eq!(rules(&f), vec![("MG004", Severity::Error)]);
+        assert_eq!(f[0].object, "0078_c");
+        assert!(
+            f[0].message.contains("has the same version as"),
+            "{}",
+            f[0].message
+        );
+        // A renamed file keeps its version: with the old name gone, the new one is the migration that ran.
+        let renamed = vec![
+            Migration::linear("0076_a", "1782000000000"),
+            Migration::linear("0077_b_renamed", "1782994900937"),
+        ];
+        assert_eq!(check(skips, &renamed, &applied), vec![]);
+    }
+
+    #[test]
     fn a_migration_recorded_by_its_full_name_is_never_late() {
         let a = Migration::linear("20240101_000000_a", "20240101_000000");
         let b = Migration::linear("20240102_000000_b", "20240102_000000");
         assert_eq!(
-            check(WARN, &[a.clone(), b.clone()], &ran(&[&a.id, &b.id])),
+            check(WARN, &[a.clone(), b.clone()], &ran_named(&[&a.id, &b.id])),
             vec![]
         );
     }
@@ -376,7 +460,7 @@ mod tests {
             Migration::linear("20261119_080000_more", "20261119_080000"),
         ];
         assert_eq!(
-            check(WARN, &repo, &ran(&["20261118_232700_add_v2"])),
+            check(WARN, &repo, &ran_named(&["20261118_232700_add_v2"])),
             vec![]
         );
         let late = vec![
@@ -384,7 +468,7 @@ mod tests {
             repo[0].clone(),
         ];
         assert_eq!(
-            rules(&check(WARN, &late, &ran(&["20261118_232700_add_v2"]))),
+            rules(&check(WARN, &late, &ran_named(&["20261118_232700_add_v2"]))),
             vec![("MG004", Severity::Warning)]
         );
     }

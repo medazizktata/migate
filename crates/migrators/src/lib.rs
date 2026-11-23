@@ -633,8 +633,14 @@ mod tests {
         findings.iter().map(|f| (f.rule, f.severity)).collect()
     }
 
-    fn ran(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
+    /// What production ran, each given as it is recorded: a version, or a name (both, as the order rule matches either).
+    fn ran(v: &[&str]) -> Vec<migate_core::order::Ran> {
+        v.iter()
+            .map(|s| migate_core::order::Ran {
+                id: Some(s.to_string()),
+                version: s.to_string(),
+            })
+            .collect()
     }
 
     #[test]

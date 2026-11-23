@@ -222,17 +222,22 @@ fn run_check(s: &Settings) -> Result<Checked, String> {
     // Production has run what the ledger records, and will have run what the base branch holds by the time this change
     // ships; without a ledger the base branch alone still shows a migration merged from an old branch.
     let at_base = project::migrations_at(&s.root, &s.base, &s.migrator)?;
-    let applied: Vec<String> = base
+    let applied: Vec<order::Ran> = base
         .keys()
         .chain(head.keys())
         .map(|id| {
-            version_of
+            let version = version_of
                 .get(id.as_str())
-                .map_or(id.clone(), |v| (*v).to_string())
+                .map_or(id.clone(), |v| (*v).to_string());
+            (id.clone(), version)
         })
-        .chain(at_base.into_iter().map(|m| m.version))
+        .chain(at_base.into_iter().map(|m| (m.id, m.version)))
         .collect::<BTreeSet<_>>()
         .into_iter()
+        .map(|(id, version)| order::Ran {
+            id: Some(id),
+            version,
+        })
         .collect();
     findings.extend(order::check(
         s.migrator.policy(),
