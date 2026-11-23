@@ -889,8 +889,9 @@ fn host_table(table: &str) -> bool {
 /// A snapshot without the host's own tables, and without their columns, indexes and triggers.
 fn without_host_tables(s: Snapshot) -> Snapshot {
     s.retain(|o| {
-        !(o.kind() == Kind::Table && host_table(&o.name))
-            && !o.parent.as_deref().is_some_and(host_table)
+        let the_hosts_table = o.kind() == Kind::Table && host_table(&o.name);
+        let inside_it = o.parent.as_deref().is_some_and(host_table);
+        !(the_hosts_table || inside_it)
     })
 }
 
