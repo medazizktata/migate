@@ -1,0 +1,4 @@
+self-hosted-runner:
+  # The self-hosted runner's own label (docs/ci-runner.md).
+  labels:
+    - migate

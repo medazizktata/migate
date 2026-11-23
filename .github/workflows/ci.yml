@@ -3,6 +3,15 @@ name: ci
 # not on every push; guard.yml runs on every push. See docs/releasing.md.
 on:
   workflow_call:
+    inputs:
+      runner:
+        description: The runs-on labels as JSON; GitHub's hosted runner unless the fallback (fallback.yml) asks otherwise.
+        type: string
+        default: '"ubuntu-latest"'
+      ref:
+        description: The commit to check; the triggering one when empty.
+        type: string
+        default: ""
   workflow_dispatch:
   pull_request:
 
@@ -10,50 +19,52 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ inputs.runner }}
   cancel-in-progress: true
 
 # Third-party actions are pinned to commit SHAs (the tag is in the comment), so an upstream change cannot alter CI.
 jobs:
   check:
     name: all checks (scripts/check.sh)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner || '"ubuntu-latest"') }} # GitHub's, or the fallback's (docs/ci-runner.md)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - uses: ./.github/actions/runner-prep
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: "1.93.1" # keep equal to rust-toolchain.toml
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-deny,typos,shellcheck
       - name: install actionlint 1.7.12 (checksum verified)
         run: |
-          curl -sSfL -o /tmp/al.tgz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/al.tgz" | sha256sum -c -
-          tar -xzf /tmp/al.tgz -C /usr/local/bin actionlint
+          curl -sSfL -o "$RUNNER_TEMP/al.tgz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/al.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/al.tgz" -C "$RUNNER_TEMP/bin" actionlint
       - run: bash scripts/check.sh
 
   msrv:
     name: minimum supported Rust (rust-version = 1.89)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner || '"ubuntu-latest"') }} # GitHub's, or the fallback's (docs/ci-runner.md)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - uses: ./.github/actions/runner-prep
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: "1.89"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # `+1.89` beats rust-toolchain.toml; without it this job would silently check with the pinned 1.93.1.
       - run: cargo +1.89 check --workspace --all-targets --locked
 
   postgres:
     name: PostgreSQL ${{ matrix.pg }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner || '"ubuntu-latest"') }} # GitHub's, or the fallback's (docs/ci-runner.md)
     strategy:
       fail-fast: false
       matrix:
@@ -64,12 +75,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - uses: ./.github/actions/runner-prep
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: "1.93.1" # keep equal to rust-toolchain.toml
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: install PostgreSQL from the PostgreSQL project's apt repository
+      # GitHub's runner installs it each time; the self-hosted one has it installed once, binaries only, and its user
+      # has no sudo (docs/ci-runner.md).
+      - name: PostgreSQL ${{ matrix.pg }} from the PostgreSQL project's apt repository
         run: |
+          [ -x "/usr/lib/postgresql/$PG/bin/postgres" ] && exit 0
           sudo apt-get update -q
           sudo apt-get install -y -q postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y

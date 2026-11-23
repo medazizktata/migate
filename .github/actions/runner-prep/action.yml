@@ -1,0 +1,30 @@
+name: prepare the shared self-hosted runner
+description: >-
+  The runner is a home machine whose disk other projects' jobs share. Stop before building when it is short of space,
+  and keep temporary files, tools and (unless turned off) the build inside this job's temporary folder, which the
+  runner empties when the job ends, so nothing accumulates between runs.
+inputs:
+  target-dir:
+    description: Put cargo's build in the job's temporary folder. Off for cargo-mutants, which manages its own builds.
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: at least 10 GB free on the shared disk
+      shell: bash
+      run: |
+        free_gb=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print int($4/1048576)}')
+        echo "free on the runner's disk: ${free_gb} GB"
+        if [ "$free_gb" -lt 10 ]; then
+          echo "::error::only ${free_gb} GB free on the shared runner; not building"
+          exit 1
+        fi
+    - name: temporary files, tools and the build in the job's temporary folder
+      shell: bash
+      env:
+        TARGET_DIR: ${{ inputs.target-dir }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/bin"
+        echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+        echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        if [ "$TARGET_DIR" = "true" ]; then echo "CARGO_TARGET_DIR=$RUNNER_TEMP/target" >> "$GITHUB_ENV"; fi

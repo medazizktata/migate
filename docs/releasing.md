@@ -1,7 +1,9 @@
 # Releasing
 
 The repository is private for now, and a private repository on GitHub's free plan gets about 2,000 Linux runner
-minutes a month. CI is arranged so that pushing costs almost nothing and the full suite runs once per release.
+minutes a month. CI is arranged so that pushing costs almost nothing and the full suite runs once per release. A
+workflow that fails on GitHub's runners, or that GitHub does not start, runs again on a self-hosted runner
+(`ci-runner.md`).
 
 ## What runs when
 
@@ -12,6 +14,8 @@ minutes a month. CI is arranged so that pushing costs almost nothing and the ful
 | by hand (Actions tab, or `gh workflow run`) | `ci.yml` | the full suite: all checks, minimum Rust, PostgreSQL 15-18 | about 13 |
 | by hand | `release.yml` | a dry run: the suite and the build, no release | about 13 |
 | the 1st of each month, or by hand | `mutants.yml` | mutation testing of `migate-core`, and of the SQL scanner | about 19, plus about 7 (the scanner, measured locally) |
+| Mondays, or by hand | `runner-cleanup.yml` | old Rust toolchains and runner logs on the self-hosted runner | under 1 |
+| a run of `ci`, `guard` or `mutants` failing | `fallback.yml` | the same workflow again, on the self-hosted runner | none on GitHub |
 
 Every commit already runs the checks locally (`.githooks/pre-commit`), and every push runs the sensitive-content
 check locally (`.githooks/pre-push`), so CI between releases adds Linux and the PostgreSQL versions, not first

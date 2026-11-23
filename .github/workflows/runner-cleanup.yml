@@ -1,0 +1,46 @@
+name: runner cleanup
+# Weekly, on the self-hosted runner: what its jobs leave behind that nothing else removes. Builds live in each job's
+# temporary folder (emptied after the job) and Cargo prunes its own downloads, so this is old Rust toolchains and the
+# runner's own logs. Only the runner user's home is touched (docs/ci-runner.md).
+on:
+  schedule:
+    - cron: "30 8 * * 1" # Mondays 08:30 UTC, after the runner's machine wakes for the day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: old toolchains and runner logs
+    runs-on: [self-hosted, migate] # a home Linux runner shared with other projects (docs/ci-runner.md)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: only the runner user's own home
+        run: |
+          if [ "$(id -un)" != migate-ci ]; then
+            echo "::error::running as $(id -un), not the migate runner's user; nothing removed"
+            exit 1
+          fi
+          du -sh "$HOME" | sed 's/^/before: /'
+      - name: Rust toolchains other than the two CI pins
+        run: |
+          pinned=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          msrv=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "keeping $pinned and $msrv"
+          command -v rustup > /dev/null || exit 0
+          rustup toolchain list | awk '{print $1}' | while read -r t; do
+            case "$t" in "$pinned"-* | "$msrv"-*) ;; *) rustup toolchain uninstall "$t" ;; esac
+          done
+      - name: runner logs older than 14 days
+        run: |
+          diag="$HOME/actions-runner/_diag"
+          [ -d "$diag" ] || exit 0
+          find "$diag" -maxdepth 1 -type f -name '*.log' -mtime +14 -print -delete | wc -l | sed 's/$/ log files removed/'
+      - name: what is left
+        if: always()
+        run: |
+          du -sh "$HOME" | sed 's/^/after: /'
+          df -h "$HOME" | tail -1
