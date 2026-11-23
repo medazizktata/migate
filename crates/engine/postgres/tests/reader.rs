@@ -80,7 +80,7 @@ create view shop.big_orders as select id, total from shop.orders where total > 1
 create materialized view shop.order_totals as select user_id, sum(total) as s from shop.orders group by user_id;
 create function shop.touch() returns trigger language plpgsql as $$ begin new.note := coalesce(new.note, ''); return new; end $$;
 create function shop.add(a int, b int) returns int language sql as 'select a + b';
-create function shop.add(a int, b int, c int) returns int language sql as 'select a + b + c';
+create function shop.add(a int, b int, c int default 0) returns int language sql as 'select a + b + c';
 create trigger orders_touch before insert or update on shop.orders for each row execute function shop.touch();
 "#;
 
@@ -246,15 +246,11 @@ fn every_kind_is_read_from_a_real_server() {
         s.get(Kind::Routine, "shop", None, "add(a integer, b integer)")
             .is_some()
     );
-    assert!(
-        s.get(
-            Kind::Routine,
-            "shop",
-            None,
-            "add(a integer, b integer, c integer)"
-        )
-        .is_some()
-    );
+    assert!(matches!(
+        &get(&s, Kind::Routine, None, "add(a integer, b integer, c integer)").detail,
+        Detail::Routine { signature, returns, .. }
+            if signature == "a integer, b integer, c integer DEFAULT 0" && returns == "integer"
+    ));
     assert!(matches!(&get(&s, Kind::Enum, None, "mood").detail,
         Detail::Enum { values } if values == &["sad", "ok", "happy"]));
     assert!(matches!(

@@ -225,6 +225,12 @@ pub enum Detail {
         /// The identity arguments, e.g. `integer, text`.
         arguments: String,
         definition_sha256: String,
+        /// Every argument with its mode, name and default, e.g. `p_id integer, p_note text DEFAULT NULL::text`.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        signature: String,
+        /// The result type, e.g. `jsonb`, `SETOF record`; empty for a procedure.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        returns: String,
     },
     Enum {
         values: Vec<String>,

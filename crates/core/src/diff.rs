@@ -187,6 +187,83 @@ pub fn classify_with(changes: &[Change], filled: &BTreeSet<String>) -> Vec<Findi
                     .push_str(" on a column this change adds, empty in every existing row");
             }
         }
+        if let Change::Dropped(o) = change
+            && let Some(by) = compatible_replacement(o, changes)
+        {
+            for f in &mut out[start..] {
+                f.severity = Severity::Note;
+                f.message.push_str(&format!(
+                    "; replaced by {}({}): every old argument kept in place, the new ones defaulted, the same result \
+                     type, so the running app's calls still resolve",
+                    by.name.split('(').next().unwrap_or(&by.name),
+                    signature(by)
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// A routine added in the same change that the old version's calls to `dropped` still reach: the same name and
+/// namespace, the old arguments first and unchanged (mode, name, type, default), every new one with a default, and the
+/// same result type. What the result holds is not compared: a `jsonb` that changes shape still returns `jsonb`.
+fn compatible_replacement<'a>(dropped: &Object, changes: &[Change<'a>]) -> Option<&'a Object> {
+    let Detail::Routine {
+        signature: old,
+        returns: was,
+        ..
+    } = &dropped.detail
+    else {
+        return None;
+    };
+    let base = |o: &Object| o.name.split('(').next().unwrap_or(&o.name).to_string();
+    if was.is_empty() && old.is_empty() {
+        return None;
+    }
+    let old_args = arguments(old);
+    changes.iter().find_map(|c| match c {
+        Change::Added(a)
+            if a.namespace == dropped.namespace
+                && base(a) == base(dropped)
+                && matches!(&a.detail, Detail::Routine { returns, .. } if returns == was) =>
+        {
+            let new_args = arguments(signature(a));
+            (new_args.len() >= old_args.len()
+                && new_args[..old_args.len()] == old_args[..]
+                && new_args[old_args.len()..]
+                    .iter()
+                    .all(|x| x.contains(" DEFAULT ")))
+            .then_some(*a)
+        }
+        _ => None,
+    })
+}
+
+fn signature(o: &Object) -> &str {
+    match &o.detail {
+        Detail::Routine { signature, .. } => signature,
+        _ => "",
+    }
+}
+
+/// A routine's arguments, split at top-level commas (`numeric(10,2)` stays whole).
+fn arguments(signature: &str) -> Vec<String> {
+    let (mut out, mut depth, mut current) = (Vec::new(), 0usize, String::new());
+    for ch in signature.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(current.trim().to_string());
+                current.clear();
+                continue;
+            }
+            _ => {}
+        }
+        current.push(ch);
+    }
+    if !current.trim().is_empty() {
+        out.push(current.trim().to_string());
     }
     out
 }
@@ -631,6 +708,8 @@ mod tests {
                 Detail::Routine {
                     arguments: args.into(),
                     definition_sha256: body.into(),
+                    signature: String::new(),
+                    returns: String::new(),
                 },
             )
         };
@@ -1015,6 +1094,53 @@ mod tests {
     }
 
     #[test]
+    fn a_routine_replaced_compatibly_is_a_note() {
+        let f = |name: &str, sig: &str, returns: &str| Object {
+            namespace: "public".into(),
+            name: name.into(),
+            parent: None,
+            detail: Detail::Routine {
+                arguments: String::new(),
+                definition_sha256: String::new(),
+                signature: sig.into(),
+                returns: returns.into(),
+            },
+        };
+        let old = f(
+            "up(p_url text, p_n integer)",
+            "p_url text, p_n integer DEFAULT 0",
+            "uuid",
+        );
+        let found = |new: Object| {
+            classify(&[Change::Dropped(&old), Change::Added(&new)])
+                .into_iter()
+                .map(|x| (x.rule, x.severity))
+                .collect::<Vec<_>>()
+        };
+        // Old arguments kept, a new one defaulted, the same result type: the old calls still resolve.
+        assert_eq!(
+            found(f(
+                "up(p_url text, p_n integer, p_note text)",
+                "p_url text, p_n integer DEFAULT 0, p_note text DEFAULT NULL::text",
+                "uuid"
+            )),
+            [("MG505", Severity::Note)]
+        );
+        // A new argument without a default, a renamed one, or another result type: the old calls break.
+        for new in [
+            f(
+                "up(a)",
+                "p_url text, p_n integer DEFAULT 0, p_note text",
+                "uuid",
+            ),
+            f("up(b)", "url text, p_n integer DEFAULT 0", "uuid"),
+            f("up(c)", "p_url text, p_n integer DEFAULT 0", "jsonb"),
+        ] {
+            assert_eq!(found(new), [("MG505", Severity::Error)]);
+        }
+    }
+
+    #[test]
     fn a_kind_one_reader_cannot_see_is_not_a_drop() {
         let mut base = base_objects();
         base.push(top(
@@ -1022,6 +1148,8 @@ mod tests {
             Detail::Routine {
                 arguments: String::new(),
                 definition_sha256: String::new(),
+                signature: String::new(),
+                returns: String::new(),
             },
         ));
         let b = snap(base);

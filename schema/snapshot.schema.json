@@ -501,6 +501,14 @@
             "kind": {
               "type": "string",
               "const": "routine"
+            },
+            "returns": {
+              "description": "The result type, e.g. `jsonb`, `SETOF record`; empty for a procedure.",
+              "type": "string"
+            },
+            "signature": {
+              "description": "Every argument with its mode, name and default, e.g. `p_id integer, p_note text DEFAULT NULL::text`.",
+              "type": "string"
             }
           },
           "required": [

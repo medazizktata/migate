@@ -927,7 +927,8 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
 
     for r in q(format!(
         "select n.nspname as ns, p.proname as name, pg_get_function_identity_arguments(p.oid) as args, \
-         pg_get_functiondef(p.oid) as def \
+         pg_get_functiondef(p.oid) as def, pg_get_function_arguments(p.oid) as sig, \
+         coalesce(pg_get_function_result(p.oid), '') as returns \
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace \
          where p.prokind in ('f', 'p') and {USER_SCHEMA} and {} \
          and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid \
@@ -943,6 +944,8 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
             Detail::Routine {
                 arguments: args.into(),
                 definition_sha256: digest.iter().map(|b| format!("{b:02x}")).collect(),
+                signature: s(&r, "sig").into(),
+                returns: s(&r, "returns").into(),
             },
         ));
     }
