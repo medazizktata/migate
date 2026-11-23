@@ -35,8 +35,9 @@ error there is a candidate false alarm, and a commit migate could not check is a
   recording migrations each removal is MG002; without one it stays "nothing was checked".
 - **basejump's first commit**: no parent to compare with; a limit of the sweep, not of migate.
 
-After the fixes, the sweep was run again on `2040b46`: the same exit codes everywhere, and on openstatus the new
-migration is the one named.
+After the fixes, the sweep was run again: the same exit codes everywhere, and on openstatus the new migration is the one
+named. Basejump ran on `2040b46`; the other four on the build before `a9cc54a`, whose change concerns only a commit
+removing every migration, which none of them has.
 
 ## Not covered
 
