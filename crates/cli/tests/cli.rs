@@ -1911,6 +1911,28 @@ fn findings_the_sandbox_did_not_need_survive_when_it_cannot_check() {
 }
 
 #[test]
+fn a_migration_emptying_a_table_is_data_loss_even_with_no_rows_to_count() {
+    // No seed: the table is empty in the sandbox, so MG105 has nothing to count; the statement is the evidence.
+    let r = sandbox_repo(SANDBOX_TOML, "DELETE FROM users;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG107") && out.contains("users") && !out.contains("MG105"),
+        "{out}"
+    );
+    // A filtered delete, a table the same migration creates, and a marker naming why leave nothing to block.
+    for second in [
+        "DELETE FROM users WHERE id = 1;",
+        "CREATE TABLE cache (k TEXT);\nDELETE FROM cache;",
+        "-- migate: contract delete-all-rows users -- every user is re-imported next release\nDELETE FROM users;",
+    ] {
+        let r = sandbox_repo(SANDBOX_TOML, second);
+        let (code, out, err) = sandbox_check(&r, &[]);
+        assert_eq!(code, 0, "{second}\n{out}{err}");
+    }
+}
+
+#[test]
 fn sandbox_catches_values_a_migration_blanks_without_losing_rows() {
     let seeded = SANDBOX_TOML.replace("test = ", "seed = \"python3 seed.py\"\ntest = ");
     // The base migration leaves a row with a legacy value; the change blanks it but deletes nothing.

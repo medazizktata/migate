@@ -205,6 +205,25 @@ pub fn run(
             }
         }
     }
+    // Rows a SQL migration deletes outright, read from its text: MG105 counts rows, and a table the seed left empty
+    // loses none.
+    for (path, text) in added.iter().filter(|(p, _)| p.ends_with(".sql")) {
+        for (line, table) in migate_core::emptied::emptied_tables(text)
+            .into_iter()
+            .filter(|(_, t)| !host_table(t.rsplit('.').next().unwrap_or(t)))
+        {
+            too_new.push(
+                Finding::new(
+                    "MG107",
+                    Severity::Error,
+                    table,
+                    "every row deleted (a DELETE without WHERE, or a TRUNCATE): production loses them, whatever the \
+                     sandbox's database held",
+                )
+                .at(path.clone(), line),
+            );
+        }
+    }
     let (mut markers, mut bad_markers) = (Vec::new(), Vec::new());
     for (path, text) in &added {
         let (m, bad) = contract::parse(path, text);

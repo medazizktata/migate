@@ -213,7 +213,7 @@ planned before large-database support is claimed.
 | The SQLite schema reader (and a throwaway SQLite database), producing the shared schema model | built and tested; several database files and deferrable foreign keys included |
 | The schema diff and 23 breaking-change rules (drops, NOT NULL, narrowing, defaults, constraints, views, triggers, enums) | built and tested in the core |
 | `migate check` with `[sandbox]`: migrate a throwaway SQLite database at base and HEAD, diff, run the base version's tests | built and tested (fresh mode; Rails needs the pre-boot mode, not built) |
-| Test runs proven to use the database (MG813); rows lost by the migrations (MG105) | built and tested |
+| Test runs proven to use the database (MG813); rows lost by the migrations (MG105), or emptied outright in their text (MG107) | built and tested |
 | A blind test drive on real Django, Rails, Drizzle, Prisma and D1 projects | done (`end-to-end-testing/2026-11-19-test-drive-1.md`); its findings are being fixed |
 | The PostgreSQL engine: a throwaway local server per run and a catalog reader, behind an engine plug-in interface | built and tested on PostgreSQL 18 (partitions and extension objects skipped) |
 | The pre-boot runner, production checks, PR comment | planned (backlog) |

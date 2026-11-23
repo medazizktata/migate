@@ -114,6 +114,12 @@ pub const RULES: &[Rule] = &[
         axes: "D",
     },
     Rule {
+        id: "MG107",
+        name: "delete-all-rows",
+        description: "A migration deletes every row of a table: a DELETE with no WHERE, or a TRUNCATE. Read from the migration's text, so it is seen even when the sandbox's database holds no rows there (MG105 counts rows, and an empty table loses none). A table the same migration creates is exempt. Accept a deliberate emptying with a marker naming why.",
+        axes: "D",
+    },
+    Rule {
         id: "MG201",
         name: "drop-column",
         description: "A column was dropped. The running app still selects or inserts it, and its values are gone. Stop using it in one release, drop it in the next.",
