@@ -1178,11 +1178,12 @@ fn stop_server(pid: u32) {
     send("-KILL");
 }
 
-/// SIGTERM to a process group, then SIGKILL if it is still there after two seconds.
+/// SIGTERM to a process group, then SIGKILL if it is still there after two seconds. The `--` matters: procps-ng's kill
+/// (Linux) reads `kill -TERM -123` as no process at all, exits 0 and signals nothing; BSD's accepts both forms.
 fn stop_group(group: u32) {
     let signal = |sig: &str| {
         Command::new("kill")
-            .args([sig, &format!("-{group}")])
+            .args([sig, "--", &format!("-{group}")])
             .stderr(Stdio::null())
             .status()
             .is_ok_and(|s| s.success())
