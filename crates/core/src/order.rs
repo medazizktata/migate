@@ -188,8 +188,25 @@ fn linear(policy: Policy, model: OrderModel, repo: &[Migration], applied: &[Ran]
         Ordering::Equal => policy.silent_skip || model == OrderModel::SingleVersion,
         Ordering::Greater => false,
     };
+    // A migrator that goes by versions runs an applied migration again once its version moves after the last one run.
+    let again = repo.iter().filter_map(|m| {
+        let was = applied.iter().find(|r| r.id.as_deref() == Some(m.id.as_str()) && r.version != m.version)?;
+        (policy.silent_skip && compare(model, &m.version, last) == Ordering::Greater).then(|| {
+            Finding::new(
+                "MG001",
+                Severity::Error,
+                &m.id,
+                format!(
+                    "production ran it as version {}; now {}, after {last}, the last one it ran: the migrator will run it \
+                     again. Restore its version",
+                    was.version, m.version
+                ),
+            )
+        })
+    });
     // History tables store either the version (Rails) or the full migration name (Payload, Prisma, Wrangler).
-    repo.iter()
+    let pending = repo
+        .iter()
         .filter(|m| !ran_ids.contains(m.id.as_str()) && !taken.contains(m.version.as_str()))
         .filter(|m| skipped(m))
         .map(|m| {
@@ -204,8 +221,8 @@ fn linear(policy: Policy, model: OrderModel, repo: &[Migration], applied: &[Ran]
                 &m.id,
                 format!("pending, but {place} {last}, the last one production ran: {why}"),
             )
-        })
-        .collect()
+        });
+    again.chain(pending).collect()
 }
 
 fn graph(repo: &[Migration]) -> Vec<Finding> {
@@ -431,6 +448,21 @@ mod tests {
             Migration::linear("0077_b_renamed", "1782994900937"),
         ];
         assert_eq!(check(skips, &renamed, &applied), vec![]);
+        // Its version moved after the last one run: a migrator going by versions runs it again.
+        let moved_later = vec![
+            Migration::linear("0076_a", "1782000000000"),
+            Migration::linear("0077_b", "1783000000000"),
+        ];
+        let f = check(skips, &moved_later, &applied);
+        assert_eq!(rules(&f), vec![("MG001", Severity::Error)]);
+        assert!(f[0].message.contains("run it again"), "{}", f[0].message);
+        // A migrator that goes by names is not misled by a version.
+        let by_name = Policy {
+            silent_skip: false,
+            out_of_order: OutOfOrder::Warn,
+            ..skips
+        };
+        assert_eq!(check(by_name, &moved_later, &applied), vec![]);
     }
 
     #[test]

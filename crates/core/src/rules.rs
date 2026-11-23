@@ -32,7 +32,7 @@ pub const RULES: &[Rule] = &[
     Rule {
         id: "MG001",
         name: "applied-migration-edited",
-        description: "A migration production already ran was edited. Production keeps the old version; add a new migration instead.",
+        description: "A migration production already ran was edited. Production keeps the old version; add a new migration instead. Where the migration tool goes by versions (Drizzle's journal times), an applied migration whose version moved after the last one run is run again.",
         axes: "",
     },
     Rule {
