@@ -203,10 +203,12 @@ fn run_check(s: &Settings) -> Result<Checked, String> {
         }
         AtBase::Absent => Ledger::new(),
     };
-    // None left is a removal when the base had some under this migrator (each recorded one is MG002), and "nothing to
-    // check", usually the wrong migrator, when it had none either.
+    // None left is a removal the ledger can report (MG002 for each recorded one) when it records migrations and the base
+    // had some under this migrator. Otherwise nothing is checked: usually the wrong migrator, or no ledger to say what
+    // production ran.
     if project.migrations.is_empty()
-        && project::migrations_at(&s.root, &s.base, &s.migrator)?.is_empty()
+        && (base.is_empty() && head.is_empty()
+            || project::migrations_at(&s.root, &s.base, &s.migrator)?.is_empty())
     {
         found_any(&project, s)?;
     }

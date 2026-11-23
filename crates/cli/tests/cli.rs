@@ -161,6 +161,25 @@ fn removing_every_applied_migration_fails_each_one_not_nothing_checked() {
 }
 
 #[test]
+fn removing_every_migration_without_a_ledger_checks_nothing() {
+    // Without a ledger nothing says production ran them, so no MG002; passing would claim a check that never ran.
+    let r = Repo::new();
+    r.write(ORDERS, "class CreateOrders < ActiveRecord::Migration[8.1]\n  def change\n    create_table :orders\n  end\nend\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.delete(ORDERS);
+    r.commit("remove the migrations");
+    let out = r.migate(&["check", "--migrator", "rails", "--base", "main"]);
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("nothing was checked"));
+}
+
+#[test]
 fn mg002_removing_an_applied_migration_fails() {
     let r = rails();
     r.delete(TOTAL);
