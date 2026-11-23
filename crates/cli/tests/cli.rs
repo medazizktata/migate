@@ -150,6 +150,17 @@ fn mg001_editing_an_applied_migration_fails() {
 }
 
 #[test]
+fn removing_every_applied_migration_fails_each_one_not_nothing_checked() {
+    // No migration left is not "nothing to check" when the ledger says production ran some.
+    let r = rails();
+    r.delete(ORDERS);
+    r.delete(TOTAL);
+    let (code, out, err) = r.check("rails");
+    assert_eq!(code, 2, "{out}{err}");
+    assert_eq!(out.matches("error   MG002").count(), 2, "{out}");
+}
+
+#[test]
 fn mg002_removing_an_applied_migration_fails() {
     let r = rails();
     r.delete(TOTAL);

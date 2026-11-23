@@ -196,7 +196,6 @@ struct Checked {
 /// The findings, each migration's file, and how many migrations were read (so an empty pass is visible as one).
 fn run_check(s: &Settings) -> Result<Checked, String> {
     let project = project::read(&s.root, &s.migrator)?;
-    found_any(&project, s)?;
     let head = ledger_file::read(&s.root.join(&s.ledger), s.ledger_format)?;
     let base = match file_at_base(&s.root, &s.base, &s.ledger)? {
         AtBase::Found(text) => {
@@ -204,6 +203,13 @@ fn run_check(s: &Settings) -> Result<Checked, String> {
         }
         AtBase::Absent => Ledger::new(),
     };
+    // None left is a removal when the base had some under this migrator (each recorded one is MG002), and "nothing to
+    // check", usually the wrong migrator, when it had none either.
+    if project.migrations.is_empty()
+        && project::migrations_at(&s.root, &s.base, &s.migrator)?.is_empty()
+    {
+        found_any(&project, s)?;
+    }
 
     let mut findings = ledger::check(&base, &head, &project.files, s.migrator.checksum());
 
