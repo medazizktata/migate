@@ -2135,7 +2135,7 @@ fn an_interrupt_while_the_server_starts_stops_it() {
         &r.dir,
         &format!("echo $$ > {}\nexec sleep 60", pid_file.display()),
     );
-    let child = Command::new(env!("CARGO_BIN_EXE_migate"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_migate"))
         .current_dir(&r.dir)
         .arg("check")
         .env("MIGATE_PG_BIN", &bin)
@@ -2143,9 +2143,18 @@ fn an_interrupt_while_the_server_starts_stops_it() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    for _ in 0..400 {
-        if fs::read_to_string(&pid_file).is_ok_and(|p| !p.trim().is_empty()) {
-            break;
+    // The checkouts and a real initdb come first; on a loaded shared CI machine they took over ten seconds.
+    let started = std::time::Instant::now();
+    while !fs::read_to_string(&pid_file).is_ok_and(|p| !p.trim().is_empty()) {
+        if child.try_wait().unwrap().is_some()
+            || started.elapsed() > std::time::Duration::from_secs(60)
+        {
+            let _ = child.kill();
+            let out = child.wait_with_output().unwrap();
+            panic!(
+                "the stand-in server never started:\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
