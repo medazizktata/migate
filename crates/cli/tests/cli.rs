@@ -1911,6 +1911,39 @@ fn findings_the_sandbox_did_not_need_survive_when_it_cannot_check() {
 }
 
 #[test]
+fn a_change_adding_the_first_migrations_needs_no_base_database() {
+    // Like Wrangler, the migrate command refuses a migrations folder that does not exist yet, as at base here.
+    let refusing = SANDBOX_TOML.replace(
+        "migrate = \"python3 apply.py\"",
+        "migrate = \"test -d migrations && python3 apply.py\"",
+    );
+    for (first, code_wanted, wanted) in [
+        (
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY);",
+            0,
+            "no migrations",
+        ),
+        (
+            "CREATE TABLE notes (id INTEGER);\nTRUNCATE legacy;",
+            2,
+            "MG107",
+        ),
+    ] {
+        let r = Repo::new();
+        r.write("migate.toml", &refusing);
+        r.write("apply.py", APPLY);
+        r.write("old_app.py", OLD_APP);
+        r.commit("init");
+        r.git(&["checkout", "-q", "-b", "pr"]);
+        r.write("migrations/0001_first.sql", first);
+        r.commit("first migrations");
+        let (code, out, err) = sandbox_check(&r, &[]);
+        assert_eq!(code, code_wanted, "{first}\n{out}{err}");
+        assert!(out.contains(wanted), "{out}{err}");
+    }
+}
+
+#[test]
 fn a_migration_emptying_a_table_is_data_loss_even_with_no_rows_to_count() {
     // No seed: the table is empty in the sandbox, so MG105 has nothing to count; the statement is the evidence.
     let r = sandbox_repo(SANDBOX_TOML, "DELETE FROM users;");

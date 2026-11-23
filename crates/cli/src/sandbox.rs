@@ -235,6 +235,24 @@ pub fn run(
         .as_deref()
         .map_or_else(Vec::new, |word| project_markers(&added, word));
 
+    // No migrations at base: the version still serving traffic predates this migration set, so it uses nothing they
+    // create, and there is no database to start from (Wrangler, for one, refuses a migrations folder that does not
+    // exist yet). The checks of the migrations' text above still apply.
+    if at_base.is_empty() {
+        let mut findings = too_new;
+        findings.push(Finding::new(
+            "MG810",
+            Severity::Note,
+            "base tests",
+            format!(
+                "not run: the version at {base} has no migrations here, so it uses nothing they create (if they moved \
+                 rather than started, set migrations_dir)"
+            ),
+        ));
+        let findings = finish(findings, &added, &marked_files, markers, bad_markers);
+        return Ok((findings, "not started: no migrations at base".into()));
+    }
+
     if let Some(rel) = &cfg.shared {
         share(rel, &dir.join("shared"), &[&base_dir, &head_dir])?;
     }
@@ -608,10 +626,28 @@ pub fn run(
         )),
         (Some(_), false) => {}
     }
-    let findings: Vec<Finding> = findings.into_iter().map(|f| place(f, &added)).collect();
+    let findings = finish(findings, &added, &marked_files, markers, bad_markers);
+    let engine = format!(
+        "{} {}",
+        before.engine(),
+        before.engine_version().unwrap_or("(version unknown)")
+    );
+    Ok((findings, engine))
+}
+
+/// The findings placed at the migration that names their object, with every marker applied: a project's own marker
+/// (`contract_marker`) to its file's findings, then the `migate: contract` markers; malformed markers last.
+fn finish(
+    findings: Vec<Finding>,
+    added: &[(String, String)],
+    marked_files: &[(String, String, String)],
+    mut markers: Vec<contract::Marker>,
+    bad_markers: Vec<Finding>,
+) -> Vec<Finding> {
+    let findings: Vec<Finding> = findings.into_iter().map(|f| place(f, added)).collect();
     // A project's own marker accepts its file's findings one by one, as `migate: contract` markers would; only those
     // at a known line (a guessed place could be another file's finding), never the rules no marker can accept.
-    for (path, at, reason) in &marked_files {
+    for (path, at, reason) in marked_files {
         for f in &findings {
             if matches!(&f.at, Some((p, line)) if p == path && *line > 0)
                 && !contract::FINAL.contains(&f.rule)
@@ -627,12 +663,7 @@ pub fn run(
     }
     let mut findings = contract::apply(findings, &markers);
     findings.extend(bad_markers);
-    let engine = format!(
-        "{} {}",
-        before.engine(),
-        before.engine_version().unwrap_or("(version unknown)")
-    );
-    Ok((findings, engine))
+    findings
 }
 
 /// Make `rel` in each checkout a link to one folder, so base and head migrate the same database.
