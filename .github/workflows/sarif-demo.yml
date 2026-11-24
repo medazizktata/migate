@@ -1,0 +1,24 @@
+name: sarif-demo
+# Throwaway: shows how GitHub code scanning reads migate's SARIF on a pull request. Never merged.
+on: pull_request
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sarif:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - run: cargo build --release -q -p migate
+      - run: ./target/release/migate check --base HEAD~1 --format sarif > migate.sarif || true
+      - run: cat migate.sarif
+      - uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          sarif_file: migate.sarif
+          category: migate
