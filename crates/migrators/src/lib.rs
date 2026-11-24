@@ -615,10 +615,15 @@ fn graph_parents(text: &str, g: &Graph) -> Vec<String> {
         return Vec::new();
     };
     // The list ends at its matching bracket; anything nested inside it is balanced.
+    // A bracket in a comment does not count: `# see the note :)` must not end the list.
     let mut depth = 1usize;
     let mut end = text.len();
-    for (i, ch) in text[open..].char_indices() {
+    let mut chars = text[open..].char_indices();
+    while let Some((i, ch)) = chars.next() {
         match ch {
+            '#' => {
+                chars.by_ref().find(|&(_, c)| c == '\n');
+            }
             '[' | '(' | '{' => depth += 1,
             ']' | ')' | '}' => {
                 depth -= 1;
@@ -1196,6 +1201,8 @@ mod tests {
             format!("class Migration(migrations.Migration):\n    # dependencies = [('shop', '0000_gone')]\n{}", &D2A[D2A.find("    dependencies").unwrap()..]),
             // Django accepts a tuple too; it ends at its own closing parenthesis.
             "class Migration(migrations.Migration):\n    dependencies = (\n        ('shop', '0001_initial'),\n    )\n    operations = [migrations.RunPython(f, ('shop', '0000_gone'))]\n".to_string(),
+            // A closing bracket of any kind in a comment inside the list (found by a blind review).
+            "class Migration(migrations.Migration):\n    dependencies = [\n        # see the note :) } ]\n        ('shop', '0001_initial'),\n    ]\n".to_string(),
         ] {
             let got = m
                 .migrations(&files(&[
