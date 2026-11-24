@@ -44,6 +44,7 @@ One document per run, named by its date.
 | 13 | 2026-11-22 to 23 | Dogfood 6: twelve profiles, real PostgreSQL projects, two open-source projects, blind labels | `2026-11-23-dogfood-6.md` |
 | 14 | 2026-11-23 | Static checks over eight open-source projects' migration history | `2026-11-23-static-history-sweep.md` |
 | 15 | 2026-11-24 | documenso with its own test suite: the primary check on outside code | `2026-11-24-documenso-own-tests.md` |
+| 16 | 2026-11-24 | Payload on PostgreSQL, the last bundled migrator not yet run on it | `2026-11-24-payload-on-postgres.md` |
 
 ## Not covered yet
 
