@@ -313,16 +313,21 @@ impl Migrator {
         self.dir = (!dir.is_empty()).then(|| dir.to_string());
     }
 
-    /// Where each separate migration set among `paths` lives (the path before the tool's own layout, `""` for the
-    /// project root), when there are several and `migrations_dir` chose none: one tool run applies one set, so two are
-    /// two databases or a stray copy. Empty when there is one, and for tools whose apps share a database (a `group`).
+    /// The folder of each separate migration set among `paths`, as `migrations_dir` would name it (the path before
+    /// the migration's id; before the tool's own layout when the pattern has no id; `""` for the project root), when
+    /// there are several and `migrations_dir` chose none: one tool run applies one set, so two are two databases or a
+    /// stray copy. Empty when there is one, and for tools whose apps share a database (a `group`).
     pub fn separate_sets(&self, paths: &[String]) -> Vec<String> {
         if self.dir.is_some() || self.pattern.capture_names().any(|n| n == Some("group")) {
             return Vec::new();
         }
         let sets: std::collections::BTreeSet<&str> = paths
             .iter()
-            .filter_map(|p| self.pattern.find(p).map(|m| &p[..m.start()]))
+            .filter_map(|p| {
+                let c = self.pattern.captures(p)?;
+                let start = c.name("id").unwrap_or(c.get(0)?).start();
+                Some(p[..start].trim_end_matches('/'))
+            })
             .collect();
         if sets.len() < 2 {
             return Vec::new();
@@ -1223,7 +1228,19 @@ mod tests {
             "migrations/0002_b.sql",
             "docs/bench/migrations/1700_x.sql",
         ]);
-        assert_eq!(w.separate_sets(&two), ["", "docs/bench"]);
+        // Each named as migrations_dir takes it: the folder that holds the files.
+        assert_eq!(
+            w.separate_sets(&two),
+            ["docs/bench/migrations", "migrations"]
+        );
+        let dz = get("drizzle").unwrap().unwrap();
+        assert_eq!(
+            dz.separate_sets(&paths(&[
+                "drizzle/meta/_journal.json",
+                "db/meta/_journal.json"
+            ])),
+            ["db", "drizzle"]
+        );
         assert!(w.separate_sets(&two[..2]).is_empty(), "one set");
         let mut chosen = w.clone();
         chosen.set_migrations_dir("migrations");

@@ -481,7 +481,7 @@ fn separate_migration_sets_are_not_read_as_one() {
     let (code, out, err) = r.check("wrangler-d1");
     assert_eq!(code, 3, "{out}{err}");
     assert!(
-        err.contains("2 separate sets, under the project root, docs/bench")
+        err.contains("2 separate sets, in docs/bench/migrations, migrations")
             && err.contains("set migrations_dir"),
         "{err}"
     );
@@ -642,7 +642,10 @@ fn migrations_dir_keeps_one_migration_set_apart_from_another() {
     let both = r.record("wrangler-d1", &["--all"]);
     assert_eq!(both.status.code(), Some(3));
     let err = String::from_utf8_lossy(&both.stderr);
-    assert!(err.contains("under d1, supabase"), "{err}");
+    assert!(
+        err.contains("in d1/migrations, supabase/migrations"),
+        "{err}"
+    );
     assert!(!r.dir.join("migate-ledger.json").exists());
     let r = Repo::new();
     r.write("migate.toml", "migrations_dir = \"d1/migrations\"\n");

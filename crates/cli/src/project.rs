@@ -56,7 +56,7 @@ pub fn read(root: &Path, migrator: &Migrator) -> Result<Project, String> {
             .map(|s| if s.is_empty() { "the project root" } else { s })
             .collect();
         return Err(format!(
-            "{} migrations in {} separate sets, under {}: one run of the tool applies one set, so these are different \
+            "{} migrations in {} separate sets, in {}: one run of the tool applies one set, so these are different \
              databases or a copy (a fixture, an example); set migrations_dir in migate.toml to the folder of the set \
              this check is for",
             migrator.id,
