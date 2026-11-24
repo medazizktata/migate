@@ -1173,6 +1173,19 @@ mod tests {
             ]))
             .unwrap();
         assert_eq!(got[1].parents, ["shop/0001_initial"]);
+        // An annotated attribute, and a commented-out list before the real one (both seen in a blind review).
+        for text in [
+            "class Migration(migrations.Migration):\n    dependencies: list = [('shop', '0001_initial')]\n".to_string(),
+            format!("class Migration(migrations.Migration):\n    # dependencies = [('shop', '0000_gone')]\n{}", &D2A[D2A.find("    dependencies").unwrap()..]),
+        ] {
+            let got = m
+                .migrations(&files(&[
+                    ("shop/migrations/0001_initial.py", D1),
+                    ("shop/migrations/0002_add_a.py", &text),
+                ]))
+                .unwrap();
+            assert_eq!(got[1].parents, ["shop/0001_initial"], "{text}");
+        }
     }
 
     #[test]
