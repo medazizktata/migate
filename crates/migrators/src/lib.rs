@@ -42,7 +42,7 @@ enum OrderName {
 }
 
 /// A migration's parents, read from its own file: the bracketed list `list` opens (the pattern matches up to and
-/// including the list's `[`, which ends at its matching `]`), each parent matching `parent` with named groups `group`
+/// including the list's `[` or `(`, which ends at its matching bracket), each parent matching `parent` with named groups `group`
 /// and `id`. Ids matching `skip` name no concrete migration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -593,7 +593,7 @@ fn graph_parents(text: &str, g: &Graph) -> Vec<String> {
         .list
         .find(text)
         .map(|m| m.end())
-        .filter(|&end| text[..end].ends_with('['))
+        .filter(|&end| text[..end].ends_with(['[', '(']))
     else {
         return Vec::new();
     };
@@ -602,8 +602,8 @@ fn graph_parents(text: &str, g: &Graph) -> Vec<String> {
     let mut end = text.len();
     for (i, ch) in text[open..].char_indices() {
         match ch {
-            '[' => depth += 1,
-            ']' => {
+            '[' | '(' | '{' => depth += 1,
+            ']' | ')' | '}' => {
                 depth -= 1;
                 if depth == 0 {
                     end = open + i;
@@ -1177,6 +1177,8 @@ mod tests {
         for text in [
             "class Migration(migrations.Migration):\n    dependencies: list = [('shop', '0001_initial')]\n".to_string(),
             format!("class Migration(migrations.Migration):\n    # dependencies = [('shop', '0000_gone')]\n{}", &D2A[D2A.find("    dependencies").unwrap()..]),
+            // Django accepts a tuple too; it ends at its own closing parenthesis.
+            "class Migration(migrations.Migration):\n    dependencies = (\n        ('shop', '0001_initial'),\n    )\n    operations = [migrations.RunPython(f, ('shop', '0000_gone'))]\n".to_string(),
         ] {
             let got = m
                 .migrations(&files(&[

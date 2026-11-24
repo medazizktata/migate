@@ -10,10 +10,10 @@ foreign_keys_off_for_rebuilds = true
 checksum = "none"
 
 
-# A migration's parents: `dependencies = [("app", "0001_initial"), ...]`. `__first__`, `__latest__` and
+# A migration's parents: `dependencies = [("app", "0001_initial"), ...]`, or a tuple. `__first__`, `__latest__` and
 # `swappable_dependency(...)` name no concrete migration.
 [graph]
-list = '(?m)^[ \t]*dependencies[ \t]*(?::[^=\n]*)?=[ \t]*\['
+list = '(?m)^[ \t]*dependencies[ \t]*(?::[^=\n]*)?=[ \t]*[\[(]'
 parent = '''\(\s*['"](?P<group>[\w.]+)['"]\s*,\s*['"](?P<id>[\w.]+)['"]\s*\)'''
 skip = '^__'
 [history]
