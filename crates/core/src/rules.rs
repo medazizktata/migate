@@ -242,7 +242,7 @@ pub const RULES: &[Rule] = &[
     Rule {
         id: "MG505",
         name: "drop-or-change-routine",
-        description: "A routine was dropped or its arguments changed. The running app may still call the old signature. A routine dropped and created again with every old argument kept in place, the new ones defaulted and the same result type is a note: the old calls still resolve. What the result holds is not compared, so a JSON result that changes shape passes.",
+        description: "A routine was dropped or its arguments changed. The running app may still call the old signature. A routine dropped and created again with every old argument kept in place, the new ones defaulted and the same result type is a note: the old calls still resolve. One that keeps its arguments but changes its result type, or loses a default the old calls rely on, is an error. What the result holds is not compared, so a JSON result that changes shape passes, as do a new body and STRICT.",
         axes: "B",
     },
     Rule {

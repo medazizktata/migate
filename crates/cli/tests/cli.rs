@@ -1718,6 +1718,34 @@ fn postgres_server_lines(dir: &std::path::Path) -> Vec<String> {
 }
 
 #[test]
+fn postgres_sandbox_sees_a_routine_lose_its_default() {
+    // Same arguments, so the same routine to PostgreSQL; the old version's calls leaving `b` out stop resolving.
+    let r = Repo::new();
+    r.write("migate.toml", PG_TOML);
+    r.write("apply.sh", PG_APPLY);
+    r.write("old_app.sh", PG_OLD_APP);
+    r.write(
+        "migrations/0001_init.sql",
+        "create table users (id serial primary key, email text not null, legacy text);\n\
+         create function score(a int, b int default 0) returns int language sql as 'select a + b';",
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write(
+        "migrations/0002_change.sql",
+        "drop function score(int, int);\n\
+         create function score(a int, b int) returns int language sql as 'select a + b';",
+    );
+    r.commit("change");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        out.contains("MG505") && out.contains("default removed from b integer"),
+        "{out}"
+    );
+}
+
+#[test]
 fn postgres_sandbox_catches_a_dropped_column_the_old_version_writes() {
     let r = pg_repo("alter table users drop column legacy;");
     // A temp folder of its own, so servers of other tests running in parallel are not counted.

@@ -452,6 +452,45 @@ fn changed(base: &Object, head: &Object, emit: &mut impl FnMut(&'static str, Str
                 format!("routine arguments changed from ({x}) to ({y})"),
             );
         }
+        // Same arguments, so the same routine to PostgreSQL: what the running app's calls get back, and what they may
+        // leave out, can still change.
+        (
+            Detail::Routine {
+                signature: was,
+                returns: gave,
+                ..
+            },
+            Detail::Routine {
+                signature: now,
+                returns: gives,
+                ..
+            },
+        ) => {
+            if !gave.is_empty() && !gives.is_empty() && gave != gives {
+                emit(
+                    "MG505",
+                    format!(
+                        "result type changed from {gave} to {gives}: the running app reads the old one"
+                    ),
+                );
+            }
+            let (before, after) = (arguments(was), arguments(now));
+            let lost: Vec<&str> = before
+                .iter()
+                .zip(&after)
+                .filter(|(b, a)| b.contains(" DEFAULT ") && !a.contains(" DEFAULT "))
+                .map(|(b, _)| b.split(" DEFAULT ").next().unwrap_or(b))
+                .collect();
+            if !lost.is_empty() {
+                emit(
+                    "MG505",
+                    format!(
+                        "default removed from {}: the running app's calls that leave it out fail",
+                        lost.join(", ")
+                    ),
+                );
+            }
+        }
         (Detail::Enum { values: x }, Detail::Enum { values: y }) => {
             let gone: Vec<&str> = x
                 .iter()
@@ -1091,6 +1130,53 @@ mod tests {
         assert_eq!(rules_between(base_objects(), head), Vec::<&str>::new());
         let dropped = rules_between(base_objects(), vec![top("main", Detail::Namespace {})]);
         assert_eq!(dropped, ["MG101"]);
+    }
+
+    #[test]
+    fn a_routine_keeping_its_arguments_can_still_break_its_callers() {
+        let f = |sig: &str, returns: &str| Object {
+            namespace: "public".into(),
+            name: "up(p_url text, p_n integer)".into(),
+            parent: None,
+            detail: Detail::Routine {
+                arguments: "p_url text, p_n integer".into(),
+                definition_sha256: "a".into(),
+                signature: sig.into(),
+                returns: returns.into(),
+            },
+        };
+        let old = f("p_url text, p_n integer DEFAULT 0", "uuid");
+        let found = |new: Object| {
+            classify(&[Change::Changed {
+                base: &old,
+                head: &new,
+            }])
+            .into_iter()
+            .map(|x| (x.rule, x.severity, x.message))
+            .collect::<Vec<_>>()
+        };
+        let result = found(f("p_url text, p_n integer DEFAULT 0", "jsonb"));
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0]
+                .2
+                .contains("result type changed from uuid to jsonb"),
+            "{result:?}"
+        );
+        let default = found(f("p_url text, p_n integer", "uuid"));
+        assert_eq!(default.len(), 1);
+        assert!(
+            default[0].2.contains("default removed from p_n integer"),
+            "{default:?}"
+        );
+        // A new body alone, or a new default, breaks no call.
+        assert!(
+            found(f(
+                "p_url text DEFAULT ''::text, p_n integer DEFAULT 0",
+                "uuid"
+            ))
+            .is_empty()
+        );
     }
 
     #[test]
