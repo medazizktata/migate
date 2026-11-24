@@ -49,6 +49,21 @@ pub fn read(root: &Path, migrator: &Migrator) -> Result<Project, String> {
         .filter(|rel| migrator.matches(rel) && root.join(rel).is_file())
         .collect();
     matched.sort();
+    let sets = migrator.separate_sets(&matched);
+    if !sets.is_empty() {
+        let at: Vec<&str> = sets
+            .iter()
+            .map(|s| if s.is_empty() { "the project root" } else { s })
+            .collect();
+        return Err(format!(
+            "{} migrations in {} separate sets, under {}: one run of the tool applies one set, so these are different \
+             databases or a copy (a fixture, an example); set migrations_dir in migate.toml to the folder of the set \
+             this check is for",
+            migrator.id,
+            sets.len(),
+            at.join(", ")
+        ));
+    }
     let inputs: Vec<(String, String)> = matched
         .iter()
         .map(|rel| {

@@ -313,6 +313,23 @@ impl Migrator {
         self.dir = (!dir.is_empty()).then(|| dir.to_string());
     }
 
+    /// Where each separate migration set among `paths` lives (the path before the tool's own layout, `""` for the
+    /// project root), when there are several and `migrations_dir` chose none: one tool run applies one set, so two are
+    /// two databases or a stray copy. Empty when there is one, and for tools whose apps share a database (a `group`).
+    pub fn separate_sets(&self, paths: &[String]) -> Vec<String> {
+        if self.dir.is_some() || self.pattern.capture_names().any(|n| n == Some("group")) {
+            return Vec::new();
+        }
+        let sets: std::collections::BTreeSet<&str> = paths
+            .iter()
+            .filter_map(|p| self.pattern.find(p).map(|m| &p[..m.start()]))
+            .collect();
+        if sets.len() < 2 {
+            return Vec::new();
+        }
+        sets.into_iter().map(String::from).collect()
+    }
+
     /// What the base version's code (`files`: path and text, relative to the project) says about `table.column`.
     pub fn column_use(&self, files: &[(String, String)], table: &str, column: &str) -> ColumnUse {
         let Some((globs, excluded, def)) = &self.references else {
@@ -1188,6 +1205,43 @@ mod tests {
                 .unwrap();
             assert_eq!(got[1].parents, ["shop/0001_initial"], "{text}");
         }
+    }
+
+    #[test]
+    fn separate_sets_are_named_unless_one_is_chosen_or_the_tool_groups_them() {
+        let paths = |p: &[&str]| p.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let w = get("wrangler-d1").unwrap().unwrap();
+        let two = paths(&[
+            "migrations/0001_a.sql",
+            "migrations/0002_b.sql",
+            "docs/bench/migrations/1700_x.sql",
+        ]);
+        assert_eq!(w.separate_sets(&two), ["", "docs/bench"]);
+        assert!(w.separate_sets(&two[..2]).is_empty(), "one set");
+        let mut chosen = w.clone();
+        chosen.set_migrations_dir("migrations");
+        assert!(
+            chosen.separate_sets(&two).is_empty(),
+            "migrations_dir chose"
+        );
+        let p = get("prisma").unwrap().unwrap();
+        let one = paths(&[
+            "prisma/migrations/20240101000000_a/migration.sql",
+            "prisma/migrations/20240102000000_b/migration.sql",
+        ]);
+        assert!(
+            p.separate_sets(&one).is_empty(),
+            "a folder per migration is one set"
+        );
+        // Django's apps, at any depth, are one project's.
+        let d = get("django").unwrap().unwrap();
+        assert!(
+            d.separate_sets(&paths(&[
+                "shop/migrations/0001_initial.py",
+                "apps/blog/migrations/0001_initial.py",
+            ]))
+            .is_empty()
+        );
     }
 
     #[test]
