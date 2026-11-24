@@ -239,7 +239,33 @@ pub fn run(
     // create, and there is no database to start from (Wrangler, for one, refuses a migrations folder that does not
     // exist yet). The checks of the migrations' text above still apply.
     if at_base.is_empty() {
+        // The first migrations still run, on an empty database: one that fails would fail at deploy (MG803).
+        if let Some(rel) = &cfg.shared {
+            share(rel, &dir.join("shared"), &[&head_dir])?;
+        }
+        if let Some(setup) = &cfg.setup {
+            let out = kept.save("head-setup", sh(&vars(setup), &head_dir, &env)?)?;
+            if !out.status.success() {
+                return Err(format!(
+                    "the setup command failed in the head checkout:\n{}",
+                    tail(&out)
+                ));
+            }
+        }
+        eprintln!("migate: no migrations at {base}; running the first ones on an empty database");
+        let out = kept.save("head-migrate", sh(&migrate, &head_dir, &migrate_env)?)?;
         let mut findings = too_new;
+        if !out.status.success() {
+            findings.push(Finding::new(
+                "MG803",
+                Severity::Error,
+                "head migrations",
+                format!(
+                    "the first migrations fail on an empty database:\n{}",
+                    tail(&out)
+                ),
+            ));
+        }
         findings.push(Finding::new(
             "MG810",
             Severity::Note,

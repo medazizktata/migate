@@ -1993,6 +1993,8 @@ fn a_change_adding_the_first_migrations_needs_no_base_database() {
             2,
             "MG107",
         ),
+        // The first migrations still run: one that fails on an empty database fails at deploy.
+        ("INSERT INTO missing (a) VALUES (1);", 2, "error   MG803"),
     ] {
         let r = Repo::new();
         r.write("migate.toml", &refusing);
