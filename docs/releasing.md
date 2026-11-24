@@ -1,7 +1,7 @@
 # Releasing
 
-The repository is private for now, and a private repository on GitHub's free plan gets about 2,000 Linux runner
-minutes a month. CI is arranged so that pushing costs almost nothing and the full suite runs once per release. A
+The repository is public, so GitHub's standard runners cost nothing; CI was arranged when it was private (about 2,000
+Linux minutes a month), so that pushing costs almost nothing and the full suite runs once per release. A
 workflow that fails on GitHub's runners, or that GitHub does not start, runs again on a self-hosted runner
 (`ci-runner.md`).
 
@@ -63,5 +63,4 @@ patch number for fixes only.
 ## Not yet
 
 Binaries for macOS and for Linux on ARM, and the npm, pip, Homebrew and GitHub Action packages, are TASK-25. macOS
-runners cost ten times the Linux minutes on a private repository, so they wait for the repository to go public or
-for a release that needs them.
+runners are free now that the repository is public, so they wait only for a release that needs them.
