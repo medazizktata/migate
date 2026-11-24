@@ -214,6 +214,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_raw_digest_is_sha256_of_the_bytes_as_they_are() {
+        assert_eq!(
+            raw_sha256(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
     fn every_string_form_keeps_its_comment_markers_and_ends_where_it_ends() {
         // Each case: a string holding comment-like text, then a real comment. The string survives whole, the comment
         // goes; a wrong string end would either eat the comment into code or cut the string into a "comment".

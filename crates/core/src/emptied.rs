@@ -308,6 +308,118 @@ mod tests {
     }
 
     #[test]
+    fn the_line_reported_is_the_statement_s_own_after_text_spanning_lines() {
+        // Comments, strings, quoted names and dollar-quoted bodies that span lines are counted, and only once.
+        let sql = "-- one\n/* two\nthree */ SELECT 'four\nfive' AS \"six\nseven\";\nSELECT $b$ eight\nnine $b$;\nDELETE FROM t;";
+        assert_eq!(found(sql), [(8, "t".to_string())]);
+        assert_eq!(found("\n\n  TRUNCATE a;"), [(3, "a".to_string())]);
+        assert_eq!(
+            found("SELECT 1;\nWITH g AS (\n  DELETE FROM t RETURNING *\n) SELECT 1;"),
+            [(3, "t".to_string())]
+        );
+    }
+
+    #[test]
+    fn the_lexer_ends_comments_strings_and_quotes_where_the_database_does() {
+        // A nested comment ends at its own close, not the first one.
+        assert_eq!(
+            found("/* a /* b */ DELETE FROM x; */ DELETE FROM y;"),
+            [(1, "y".to_string())]
+        );
+        // Without E, a backslash is an ordinary character: the string ends at the next quote.
+        assert_eq!(
+            found("SELECT 'a\\'; DELETE FROM t;"),
+            [(1, "t".to_string())]
+        );
+        // With e (any case), it escapes the quote, so the DELETE is inside the string.
+        assert!(found("SELECT e'a\\'; DELETE FROM t;';").is_empty());
+        // A word merely ending in E is not the E prefix.
+        assert_eq!(
+            found("SELECT CASE WHEN 1 THEN 'x\\' END; DELETE FROM t;"),
+            [(1, "t".to_string())]
+        );
+        // A doubled quote inside a quoted name or a string stays inside it.
+        assert_eq!(
+            found("DELETE FROM \"we\"\"ird\";"),
+            [(1, "we\"ird".to_string())]
+        );
+        assert!(found("SELECT 'it''s; DELETE FROM t;';").is_empty());
+        assert_eq!(found("DELETE FROM `t`;"), [(1, "t".to_string())]);
+        // A dollar tag may hold digits after its first character; `$1` is a parameter, not a quote.
+        assert!(found("SELECT $a1$ x; DELETE FROM t; $a1$;").is_empty());
+        assert_eq!(found("SELECT $1; DELETE FROM t;"), [(1, "t".to_string())]);
+        assert!(found("SELECT $$ x; DELETE FROM t; $$;").is_empty());
+        // A minus sign is not a comment, and E with a space before the quote is a word, not the E prefix.
+        assert_eq!(
+            found("SELECT 1 - 2; DELETE FROM t;"),
+            [(1, "t".to_string())]
+        );
+        assert_eq!(
+            found("SELECT E 'x\\'; DELETE FROM t;"),
+            [(1, "t".to_string())]
+        );
+        // Text left open at the end, or no final semicolon: no crash, and the last statement is still read.
+        for open in [
+            "SELECT 'abc",
+            "DELETE FROM \"abc",
+            "/* never closed",
+            "SELECT $q$ open",
+        ] {
+            let _ = found(open);
+        }
+        assert_eq!(
+            found("ALTER TABLE t ADD c int;\nDELETE FROM t"),
+            [(2, "t".to_string())]
+        );
+        // A word may hold a dollar sign: it does not open a quote.
+        assert_eq!(found("SELECT a$b; DELETE FROM t;"), [(1, "t".to_string())]);
+    }
+
+    #[test]
+    fn begin_case_and_end_open_a_body_only_inside_a_create() {
+        // A transaction's BEGIN and END are statements of their own.
+        assert_eq!(
+            found("BEGIN;\nDELETE FROM t;\nEND;"),
+            [(2, "t".to_string())]
+        );
+        // CASE ... END in a view is an expression, not a body: the next statement is read.
+        assert_eq!(
+            found("CREATE VIEW v AS SELECT CASE WHEN a THEN 1 END FROM x;\nDELETE FROM t;"),
+            [(2, "t".to_string())]
+        );
+        // A trigger body with a CASE ... END inside ends at its own END.
+        assert_eq!(
+            found(
+                "CREATE TRIGGER r AFTER INSERT ON a BEGIN SELECT CASE WHEN 1 THEN 2 END; DELETE FROM b; END;\nTRUNCATE c;"
+            ),
+            [(2, "c".to_string())]
+        );
+    }
+
+    #[test]
+    fn names_and_keywords_around_the_table() {
+        assert!(found("CREATE TEMP TABLE t (a int);\nDELETE FROM t;").is_empty());
+        assert!(found("CREATE TEMPORARY UNLOGGED TABLE t (a int);\nDELETE FROM t;").is_empty());
+        assert_eq!(found("DELETE FROM ONLY s.t;"), [(1, "s.t".to_string())]);
+        assert_eq!(found("DELETE FROM db.s.t;"), [(1, "db.s.t".to_string())]);
+        assert_eq!(
+            found("TRUNCATE ONLY a, ONLY b *, c RESTART IDENTITY;"),
+            [
+                (1, "a".to_string()),
+                (1, "b".to_string()),
+                (1, "c".to_string())
+            ]
+        );
+        // The DELETE's own WHERE after a subquery in its USING still filters it.
+        assert!(found("DELETE FROM t USING (SELECT 1 AS a) s WHERE t.a = s.a;").is_empty());
+        // A WHERE in a group the DELETE does not own does not filter it.
+        assert_eq!(
+            found("DELETE FROM t USING (SELECT 1 WHERE true) s;"),
+            [(1, "t".to_string())]
+        );
+    }
+
+    #[test]
     fn only_a_table_this_migration_really_created_is_exempt() {
         // Another schema's table of the same name, and one that may already exist, keep their rows.
         assert_eq!(

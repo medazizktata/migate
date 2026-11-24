@@ -1225,6 +1225,36 @@ mod tests {
         ] {
             assert_eq!(found(new), [("MG505", Severity::Error)]);
         }
+        // A new argument whose default holds a comma is still one argument, with a default.
+        assert_eq!(
+            found(f(
+                "up(p_url text, p_n integer, p_tag text)",
+                "p_url text, p_n integer DEFAULT 0, p_tag text DEFAULT concat('a', 'b')",
+                "uuid"
+            )),
+            [("MG505", Severity::Note)]
+        );
+        // A procedure returns nothing; replaced compatibly, it is a note too.
+        let proc = |sig: &str| Object {
+            namespace: "public".into(),
+            name: "tidy(p_days integer)".into(),
+            parent: None,
+            detail: Detail::Routine {
+                arguments: String::new(),
+                definition_sha256: String::new(),
+                signature: sig.into(),
+                returns: String::new(),
+            },
+        };
+        let (was, now) = (
+            proc("p_days integer"),
+            proc("p_days integer, p_dry boolean DEFAULT false"),
+        );
+        let got: Vec<_> = classify(&[Change::Dropped(&was), Change::Added(&now)])
+            .into_iter()
+            .map(|x| (x.rule, x.severity))
+            .collect();
+        assert_eq!(got, [("MG505", Severity::Note)]);
     }
 
     #[test]

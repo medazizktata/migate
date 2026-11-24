@@ -463,6 +463,18 @@ mod tests {
             ..skips
         };
         assert_eq!(check(by_name, &moved_later, &applied), vec![]);
+        // Under a tool that runs migrations by name, a newcomer with the last one's version still runs.
+        let same_version = vec![
+            Migration::linear("0076_a", "1782000000000"),
+            Migration::linear("0077_b", "1782994900937"),
+            Migration::linear("0078_c", "1782994900937"),
+        ];
+        assert!(
+            !check(by_name, &same_version, &applied)
+                .iter()
+                .any(|f| f.rule == "MG004"),
+            "a by-name tool runs it"
+        );
     }
 
     #[test]

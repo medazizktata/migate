@@ -283,6 +283,13 @@ mod tests {
     }
 
     #[test]
+    fn only_an_alter_table_has_an_action() {
+        // A word that names an action elsewhere in a statement is not one.
+        assert_eq!(found("UPDATE t SET drop = 1;", "3.30.0"), vec![]);
+        assert_eq!(found("SELECT drop FROM t;", "3.30.0"), vec![]);
+    }
+
+    #[test]
     fn versions_parse_the_way_sqlite_numbers_them() {
         assert_eq!(version_number("3.35.5"), Some(3_035_005));
         assert_eq!(version_number("3.37"), Some(3_037_000));
