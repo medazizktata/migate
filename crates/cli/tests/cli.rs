@@ -1785,6 +1785,38 @@ fn postgres_sandbox_passes_a_safe_addition() {
 }
 
 #[test]
+fn postgres_a_contract_accepts_a_drop_with_or_without_the_schema() {
+    for object in ["users.legacy", "public.users.legacy"] {
+        let r = Repo::new();
+        r.write("migate.toml", PG_TOML);
+        r.write("apply.sh", PG_APPLY);
+        r.write(
+            "old_app.sh",
+            r#"psql -X -q -v ON_ERROR_STOP=1 -d "$DATABASE_URL" -c "insert into users (email) values ('a@b.c')""#,
+        );
+        r.write(
+            "migrations/0001_init.sql",
+            "create table users (id serial primary key, email text not null, legacy text);",
+        );
+        r.commit("init");
+        r.git(&["checkout", "-q", "-b", "pr"]);
+        r.write(
+            "migrations/0002_change.sql",
+            &format!("-- migate: contract drop-column {object} -- unused since v42\nalter table users drop column legacy;"),
+        );
+        r.commit("change");
+        let (code, out, err) = sandbox_check(&r, &[]);
+        assert_eq!(code, 0, "{object}: {out}{err}");
+        assert!(
+            out.contains("public.users.legacy")
+                && out.contains("accepted by the contract at migrations/0002_change.sql:1")
+                && !out.contains("MG901"),
+            "{object}: {out}"
+        );
+    }
+}
+
+#[test]
 fn an_unknown_engine_is_refused_where_the_config_is_read() {
     let r = pg_repo("select 1;");
     r.write(
