@@ -39,6 +39,8 @@ that the old version's writes satisfy (a known limit, below).
   migate starts.
 - A schema rule cannot know what the running app writes: a CHECK added to an existing column, or a dropped table that
   only mirrors another, is reported and needs a marker.
-- A routine whose JSON result changes shape, a DELETE inside a PostgreSQL `DO` block, and revoked privileges are not
-  detected. A row-level security change is named (MG801) but not judged: the tests run as a superuser.
+- A routine whose JSON result changes shape is not detected. A DELETE inside a PostgreSQL `DO` block is caught only
+  by the row count (MG105), so only when the sandbox's table holds rows; the text check (MG107) does not read it.
+- A change to row-level security or to privileges (a revoke) is named (MG801) but not judged: the tests connect as a
+  superuser, unless they switch to another role.
 - No Windows or macOS binary yet; MySQL and SQL Server are not supported.

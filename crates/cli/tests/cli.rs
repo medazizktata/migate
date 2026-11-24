@@ -2370,17 +2370,20 @@ fn a_base_suite_that_always_fails_is_still_refused_after_the_retry() {
 fn postgres_says_what_it_did_not_check() {
     // A row-level security policy is outside migate's schema model: the change is named as not checked, never silent.
     let r = pg_repo(
-        "alter table users enable row level security;\ncreate policy none_for_you on users using (false);",
+        "alter table users enable row level security;\ncreate policy none_for_you on users using (false);\n\
+         grant select on users to public;",
     );
     let (_, out, err) = sandbox_check(&r, &[]);
     assert!(
         out.contains("MG801") && out.contains("policy public.users.none_for_you"),
         "{out}{err}"
     );
-    // The tests run as a superuser, which no policy restricts: they passed here, so they cannot be said to judge it.
+    // The tests connect as a superuser, which no policy or grant restricts: they passed here, so they cannot be said
+    // to judge it.
     for key in [
         "policy public.users.none_for_you",
         "row-level security public.users",
+        "grants public.users",
     ] {
         let line = out.lines().find(|l| l.contains(key)).unwrap_or_default();
         assert!(

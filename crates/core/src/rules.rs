@@ -266,7 +266,7 @@ pub const RULES: &[Rule] = &[
     Rule {
         id: "MG801",
         name: "not-checked",
-        description: "A check could not judge part of the change, and says so instead of passing it: the migration changed an object the schema model does not cover (a policy, a domain, a grant, an exclusion constraint and the like), so only the base version's tests judged it (not even they, for row-level security: they run as a superuser, which no policy restricts); or, with target_version set, a migration that is not a SQL file could not be read for syntax newer than production's engine (MG701).",
+        description: "A check could not judge part of the change, and says so instead of passing it: the migration changed an object the schema model does not cover (a policy, a domain, a grant, an exclusion constraint and the like), so only the base version's tests judged it (not even they, for row-level security or a grant: they connect as a superuser, which no policy or grant restricts, unless they switch to another role); or, with target_version set, a migration that is not a SQL file could not be read for syntax newer than production's engine (MG701).",
         axes: "",
     },
     Rule {

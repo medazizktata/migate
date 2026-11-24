@@ -534,9 +534,13 @@ pub fn run(
             (_, None) => "removed",
             _ => "changed",
         };
-        // The tests connect as the sandbox's superuser, which row-level security never restricts.
-        let judged = if key.starts_with("policy ") || key.starts_with("row-level security ") {
-            "and the tests run as a superuser, which no policy restricts: not judged by the base version's tests either"
+        // The tests connect as the sandbox's superuser, which neither row-level security nor a grant restricts.
+        let judged = if ["policy ", "row-level security ", "grants "]
+            .iter()
+            .any(|p| key.starts_with(p))
+        {
+            "and the tests connect as a superuser, which no policy or grant restricts: unless they switch to another \
+             role, not judged by the base version's tests either"
         } else {
             "so only the base version's tests judged it"
         };
