@@ -326,14 +326,20 @@ impl engine::Database for Db<'_> {
                     .iter()
                     .map(|c| format!("count({0}) as {0}", quoted(c)))
                     .collect();
+                // A column named like the row would be read in its place.
+                let mut row = String::from("r");
+                while cols.contains(&row) {
+                    row.push('_');
+                }
                 format!(
                     // A row, not json_build_object: a function takes at most 100 arguments, two per column.
-                    "select {} as ns, {} as tbl, (select row_to_json(x) from (select {} from {}.{}) x) as counts",
+                    "select {} as ns, {} as tbl, (select row_to_json({row}) from (select {} from {}.{}) {row}) as counts",
                     literal(ns),
                     literal(tbl),
                     fields.join(", "),
                     quoted(ns),
-                    quoted(tbl)
+                    quoted(tbl),
+                    row = quoted(&row),
                 )
             })
             .collect();

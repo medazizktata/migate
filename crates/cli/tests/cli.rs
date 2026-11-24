@@ -1785,6 +1785,18 @@ fn postgres_sandbox_passes_a_safe_addition() {
 }
 
 #[test]
+fn postgres_counts_values_whatever_the_columns_are_named() {
+    // The count query names its row; a column with that name must not be read in its place.
+    let r = pg_repo("alter table users add column x text, add column r text, add column r_ text;");
+    let (code, out, err) = sandbox_check(&r, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("MG210") && out.contains("public.users.x"),
+        "{out}"
+    );
+}
+
+#[test]
 fn postgres_a_contract_accepts_a_drop_with_or_without_the_schema() {
     for object in ["users.legacy", "public.users.legacy"] {
         let r = Repo::new();
