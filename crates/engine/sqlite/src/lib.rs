@@ -546,6 +546,7 @@ fn read_table(
                 deferrable,
                 initially_deferred,
                 validated: true,
+                match_full: false,
             }),
         });
     }

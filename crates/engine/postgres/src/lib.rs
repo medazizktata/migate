@@ -804,7 +804,7 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
          rn.nspname as ref_ns, rc.relname as ref_table, \
          (select json_agg(a.attname order by k.i) from unnest(con.confkey) with ordinality k(num, i) \
           join pg_attribute a on a.attrelid = con.confrelid and a.attnum = k.num) as ref_cols, \
-         con.confdeltype as on_delete, con.confupdtype as on_update, \
+         con.confdeltype as on_delete, con.confupdtype as on_update, con.confmatchtype as match_type, \
          con.condeferrable as deferrable, con.condeferred as deferred, \
          (select (to_jsonb(ix) ->> 'indnullsnotdistinct')::boolean from pg_index ix where ix.indexrelid = con.conindid) as nnd \
          from pg_constraint con join pg_class c on c.oid = con.conrelid \
@@ -835,6 +835,7 @@ pub fn snapshot(bin: &Path, url: &str) -> Result<Snapshot, String> {
                 deferrable: r["deferrable"].as_bool().unwrap_or(false),
                 initially_deferred: r["deferred"].as_bool().unwrap_or(false),
                 validated,
+                match_full: s(&r, "match_type") == "f",
             }),
         };
         objects.push(on(s(&r, "ns"), s(&r, "tbl"), s(&r, "name"), detail));

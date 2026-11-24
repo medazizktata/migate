@@ -362,6 +362,10 @@
               "type": "string",
               "const": "foreign_key"
             },
+            "match_full": {
+              "description": "PostgreSQL `MATCH FULL`: a key that is partly NULL is refused. The default, `MATCH SIMPLE` (SQLite's only\nform), skips the check when any of its columns is NULL.",
+              "type": "boolean"
+            },
             "on_delete": {
               "description": "e.g. `CASCADE`, `RESTRICT`, `NO ACTION`.",
               "type": "string"

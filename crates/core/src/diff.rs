@@ -269,12 +269,12 @@ fn arguments(signature: &str) -> Vec<String> {
 }
 
 /// The plain columns a foreign key, UNIQUE or unique index constrains, and whether one NULL column among them is
-/// enough to keep a row clear of it: a NULL never collides in a UNIQUE, but a foreign key `MATCH FULL` rejects a partly
-/// NULL key. `None` for anything else (a primary key forces NOT NULL, which existing rows fail; an expression or CHECK
+/// enough to keep a row clear of it: a NULL never collides in a UNIQUE, and a foreign key skips a key with a NULL in it,
+/// except `MATCH FULL`, which rejects a partly NULL key. `None` for anything else (a primary key forces NOT NULL, which existing rows fail; an expression or CHECK
 /// reads columns we cannot list; with `NULLS NOT DISTINCT` two NULLs collide).
 fn constrained_columns(o: &Object) -> Option<(Vec<String>, bool)> {
     match &o.detail {
-        Detail::ForeignKey(fk) => Some((fk.columns.clone(), false)),
+        Detail::ForeignKey(fk) => Some((fk.columns.clone(), !fk.match_full)),
         Detail::Unique {
             columns,
             nulls_not_distinct: false,
@@ -694,6 +694,7 @@ mod tests {
             deferrable: false,
             initially_deferred: false,
             validated: true,
+            match_full: false,
         })
     }
 
@@ -1331,16 +1332,34 @@ mod tests {
             found(head),
             [("MG210", Severity::Note), ("MG302", Severity::Note)]
         );
-        // A foreign key over the same pair stays an error: MATCH FULL rejects a partly NULL key.
-        let mut head = with(base.clone(), column("owner", 2, text(), true, None));
-        let mut pair = fk_on("owner");
-        if let Detail::ForeignKey(f) = &mut pair.detail {
-            f.columns = vec!["a".into(), "owner".into()];
+        // A foreign key over the same pair: MATCH SIMPLE (the default) skips a key with a NULL in it, MATCH FULL
+        // rejects one, so it stays an error there.
+        for (full, severity) in [(false, Severity::Note), (true, Severity::Error)] {
+            let mut head = with(base.clone(), column("owner", 2, text(), true, None));
+            let mut pair = fk_on("owner");
+            if let Detail::ForeignKey(f) = &mut pair.detail {
+                f.columns = vec!["a".into(), "owner".into()];
+                f.match_full = full;
+            }
+            head.push(pair);
+            assert_eq!(
+                found(head),
+                [("MG210", Severity::Note), ("MG303", severity)],
+                "MATCH FULL {full}"
+            );
         }
-        head.push(pair);
+        // The same for a UNIQUE constraint declared NULLS NOT DISTINCT.
+        let mut head = with(base.clone(), column("owner", 2, text(), true, None));
+        head.push(on_t(
+            "t_owner_key",
+            Detail::Unique {
+                columns: vec!["owner".into()],
+                nulls_not_distinct: true,
+            },
+        ));
         assert_eq!(
             found(head),
-            [("MG210", Severity::Note), ("MG303", Severity::Error)]
+            [("MG210", Severity::Note), ("MG302", Severity::Error)]
         );
         // With NULLS NOT DISTINCT two NULLs collide: a UNIQUE on a new, empty column stays an error.
         let mut head = with(base.clone(), column("owner", 2, text(), true, None));

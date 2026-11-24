@@ -141,6 +141,10 @@ pub struct ForeignKey {
     /// False for a constraint added `NOT VALID` (Postgres) that has not been validated yet.
     #[serde(default = "yes")]
     pub validated: bool,
+    /// PostgreSQL `MATCH FULL`: a key that is partly NULL is refused. The default, `MATCH SIMPLE` (SQLite's only
+    /// form), skips the check when any of its columns is NULL.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub match_full: bool,
 }
 
 /// One part of an index key.

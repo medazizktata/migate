@@ -72,7 +72,7 @@ create table shop.orders (
   note text
 );
 alter table shop.orders add constraint orders_total_check check (total >= 0) not valid;
-alter table shop.orders add constraint orders_user_strict foreign key (user_id) references shop.users (id) not valid;
+alter table shop.orders add constraint orders_user_strict foreign key (user_id) references shop.users (id) match full not valid;
 create index orders_note_lower on shop.orders (lower(note) desc, id) where note is not null;
 create unique index orders_note_strict on shop.orders (note) nulls not distinct;
 alter table shop.orders add constraint orders_id_note_strict unique nulls not distinct (id, note);
@@ -185,12 +185,12 @@ fn every_kind_is_read_from_a_real_server() {
                 ),
                 ("shop", "users", &["id".to_string()][..], "CASCADE")
             );
-            assert!(fk.deferrable && fk.initially_deferred && fk.validated);
+            assert!(fk.deferrable && fk.initially_deferred && fk.validated && !fk.match_full);
         }
         other => panic!("{other:?}"),
     }
     match &get(&s, Kind::ForeignKey, Some("orders"), "orders_user_strict").detail {
-        Detail::ForeignKey(fk) => assert!(!fk.validated && !fk.deferrable),
+        Detail::ForeignKey(fk) => assert!(!fk.validated && !fk.deferrable && fk.match_full),
         other => panic!("{other:?}"),
     }
     match &get(&s, Kind::Index, Some("orders"), "orders_note_lower").detail {
