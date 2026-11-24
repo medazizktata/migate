@@ -21,6 +21,11 @@ and GitHub keeps it queued for up to a day.
   Rust 1.88). `runner-cleanup.yml` removes, every Monday, Rust toolchains other than the two CI pins and runner logs
   older than 14 days.
 - On GitHub, run logs and artifacts expire on their own (90 days; the mutation reports after 30).
+- **Never a fork's code.** The repository is public, and a self-hosted runner runs whatever a job checks out. The
+  fallback reruns only this repository's own commits (`head_repository` must be this repository), so a fork's pull
+  request that fails on GitHub stays there. A fork's pull request could still edit `ci.yml` to ask for the `migate`
+  label, so the repository requires approval before any outside contributor's workflow runs: read the workflow changes
+  of such a pull request before approving it.
 
 ## Adding a runner
 

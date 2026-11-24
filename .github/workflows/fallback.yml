@@ -2,6 +2,7 @@ name: fallback
 # GitHub's hosted runners come first. When a run of ci, guard or mutants ends in failure (a failing check, or jobs
 # GitHub never started, as when billing blocks them), the same workflow runs again on the self-hosted runner, on the
 # same commit (docs/ci-runner.md). A real failure is thus seen twice, which tells it apart from GitHub's side.
+# Only this repository's own commits: a fork's pull request must never run on the self-hosted runner.
 on:
   workflow_run:
     workflows: [ci, guard, mutants]
@@ -12,21 +13,21 @@ permissions:
 
 jobs:
   ci:
-    if: github.event.workflow_run.name == 'ci' && contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
+    if: github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.name == 'ci' && contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
     uses: ./.github/workflows/ci.yml
     with:
       runner: '["self-hosted", "migate"]'
       ref: ${{ github.event.workflow_run.head_sha }}
 
   guard:
-    if: github.event.workflow_run.name == 'guard' && contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
+    if: github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.name == 'guard' && contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
     uses: ./.github/workflows/guard.yml
     with:
       runner: '["self-hosted", "migate"]'
       ref: ${{ github.event.workflow_run.head_sha }}
 
   mutants:
-    if: github.event.workflow_run.name == 'mutants' && contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
+    if: github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.name == 'mutants' && contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
     uses: ./.github/workflows/mutants.yml
     with:
       runner: '["self-hosted", "migate"]'
