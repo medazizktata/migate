@@ -12,7 +12,8 @@ would break the version still serving traffic, or lose data, before it deploys.
 **What it checks.**
 - **Without a database**, from the repository and its history: a migration production already ran that was edited
   or removed (with a ledger), migrations out of order for the project's migration tool, a dependency graph with
-  several heads, two migrations sharing a version (MG001-MG007).
+  several heads, two migrations sharing a version (MG001-MG007). Migrations found in several separate sets (two
+  databases, or a stray copy) stop the run until `migrations_dir` names the one the tool runs.
 - **With a `[sandbox]`**: migate migrates a throwaway database to the base branch and to the change, then runs the
   base version's own tests against the migrated database (the primary check: what the running version does, not
   what a diff suggests), compares the two schemas (drops, renames, NOT NULL, narrowing, constraints, views,
@@ -27,9 +28,9 @@ would break the version still serving traffic, or lose data, before it deploys.
 files: Payload, Prisma, Drizzle, Wrangler D1, Rails, Django, Supabase and dbmate. A binary for x86-64 Linux.
 
 **How it was tested.** Beyond its test suite, every check was tried on real projects (`end-to-end-testing/`): a
-Payload app on D1 over 36 cases, sample apps for each tool on both engines, real PostgreSQL projects, documenso run
-with its own API tests on four of its changes (both breaks it shipped caught, both safe changes passed), and the history
-of eight open-source projects; findings on projects without runnable tests were labelled by independent reviewers.
+Payload app on D1 over 36 cases, every bundled tool run with its real CLI on at least one engine it supports (Django
+and Rails on both), real PostgreSQL projects, documenso run with its own API tests on four of its changes (both breaks
+it shipped caught, both safe changes passed), and the history of eight open-source projects; findings on projects without runnable tests were labelled by independent reviewers.
 Where tests decide, the latest runs had no missed break and one false alarm: a CHECK added to an existing column
 that the old version's writes satisfy (a known limit, below).
 
