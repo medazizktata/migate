@@ -2337,6 +2337,18 @@ fn postgres_says_what_it_did_not_check() {
         out.contains("MG801") && out.contains("policy public.users.none_for_you"),
         "{out}{err}"
     );
+    // The tests run as a superuser, which no policy restricts: they passed here, so they cannot be said to judge it.
+    for key in [
+        "policy public.users.none_for_you",
+        "row-level security public.users",
+    ] {
+        let line = out.lines().find(|l| l.contains(key)).unwrap_or_default();
+        assert!(
+            line.contains("not judged by the base version's tests either")
+                && !line.contains("only the base version's tests judged it"),
+            "{key}: {out}"
+        );
+    }
 }
 
 #[test]

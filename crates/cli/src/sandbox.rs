@@ -534,11 +534,17 @@ pub fn run(
             (_, None) => "removed",
             _ => "changed",
         };
+        // The tests connect as the sandbox's superuser, which row-level security never restricts.
+        let judged = if key.starts_with("policy ") || key.starts_with("row-level security ") {
+            "and the tests run as a superuser, which no policy restricts: not judged by the base version's tests either"
+        } else {
+            "so only the base version's tests judged it"
+        };
         findings.push(Finding::new(
             "MG801",
             Severity::Warning,
             key.clone(),
-            format!("{what}; migate's schema model does not cover it, so only the base version's tests judged it"),
+            format!("{what}; migate's schema model does not cover it, {judged}"),
         ));
     }
     let mut lost_rows = BTreeSet::new();

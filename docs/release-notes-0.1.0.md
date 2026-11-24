@@ -39,5 +39,5 @@ that the old version's writes satisfy (a known limit, below).
 - A schema rule cannot know what the running app writes: a CHECK added to an existing column, or a dropped table that
   only mirrors another, is reported and needs a marker.
 - A routine whose JSON result changes shape, a DELETE inside a PostgreSQL `DO` block, and revoked privileges are not
-  detected.
+  detected. A row-level security change is named (MG801) but not judged: the tests run as a superuser.
 - No Windows or macOS binary yet; MySQL and SQL Server are not supported.
