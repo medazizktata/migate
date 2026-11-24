@@ -5,7 +5,8 @@ primary check runs the version of your app that is still live against the databa
 migration that would break the running app is stopped before it ships. It also stops a migration from changing after
 production ran it, from running out of order or being silently skipped, and from disagreeing with production's own
 history. Offline means migate itself needs no network and sends nothing anywhere; the commands you give it run as
-they would on your machine, so an install in `setup` still downloads what your lockfile names.
+they would on your machine, so an install in `setup` still downloads what your lockfile names, and a framework's
+telemetry still reports home (Payload's does on every `payload migrate`, unless its config sets `telemetry: false`).
 
 Status: early, not released. Works today on SQLite projects (Cloudflare D1's local mode included) and on PostgreSQL
 projects, with a throwaway local server. `docs/product.md`
