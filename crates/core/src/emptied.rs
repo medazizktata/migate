@@ -33,46 +33,24 @@ pub fn emptied_tables(sql: &str) -> Vec<(u32, String)> {
     for statement in statements(&lex(sql)) {
         let words: Vec<&Tok> = statement.iter().map(|(_, t, _)| t).collect();
         let at = |i: usize| words.get(i).copied();
-        let top = |i: usize| statement.get(i).is_some_and(|(_, _, depth)| *depth == 0);
+        let depth = |i: usize| statement.get(i).map_or(0, |(_, _, d)| *d);
         if at(0).is_some_and(|t| t.is("CREATE")) {
             let mut i = 1;
             while at(i).is_some_and(|t| ["TEMP", "TEMPORARY", "UNLOGGED"].iter().any(|k| t.is(k))) {
                 i += 1;
             }
-            if at(i).is_some_and(|t| t.is("TABLE")) {
-                i += 1;
-                if at(i).is_some_and(|t| t.is("IF")) {
-                    i += 3;
-                }
-                if let Some((name, _)) = name_at(&words, i) {
-                    created.push(last(&name));
-                }
+            // `IF NOT EXISTS` may meet a table that is already there, rows and all: not a new one.
+            if at(i).is_some_and(|t| t.is("TABLE"))
+                && !at(i + 1).is_some_and(|t| t.is("IF"))
+                && let Some((name, _)) = name_at(&words, i + 1)
+            {
+                created.push(plain(&name));
             }
             continue;
         }
-        let new = |name: &str| created.contains(&last(name));
-        let first = match at(0) {
-            Some(t) if t.is("WITH") => (0..words.len())
-                .find(|&i| top(i) && (words[i].is("DELETE") || words[i].is("TRUNCATE"))),
-            Some(_) => Some(0),
-            None => None,
-        };
-        let Some(first) = first else { continue };
-        let line = statement[first].0;
-        if words[first].is("DELETE") && at(first + 1).is_some_and(|t| t.is("FROM")) {
-            let mut i = first + 2;
-            if at(i).is_some_and(|t| t.is("ONLY")) {
-                i += 1;
-            }
-            let filtered = (i..words.len()).any(|j| top(j) && words[j].is("WHERE"));
-            if let Some((name, _)) = name_at(&words, i)
-                && !filtered
-                && !new(&name)
-            {
-                out.push((line, name));
-            }
-        } else if words[first].is("TRUNCATE") {
-            let mut i = first + 1;
+        let new = |name: &str| created.contains(&plain(name));
+        if at(0).is_some_and(|t| t.is("TRUNCATE")) {
+            let mut i = 1;
             if at(i).is_some_and(|t| t.is("TABLE")) {
                 i += 1;
             }
@@ -84,7 +62,7 @@ pub fn emptied_tables(sql: &str) -> Vec<(u32, String)> {
                     break;
                 };
                 if !new(&name) {
-                    out.push((line, name));
+                    out.push((statement[0].0, name));
                 }
                 i = next;
                 if at(i) == Some(&Tok::Punct('*')) {
@@ -94,6 +72,31 @@ pub fn emptied_tables(sql: &str) -> Vec<(u32, String)> {
                     break;
                 }
                 i += 1;
+            }
+            continue;
+        }
+        if !at(0).is_some_and(|t| t.is("DELETE") || t.is("WITH")) {
+            continue;
+        }
+        // Each DELETE in the statement, at the top or inside a WITH clause; its WHERE is the one in its own group.
+        for i in (0..words.len())
+            .filter(|&i| words[i].is("DELETE") && at(i + 1).is_some_and(|t| t.is("FROM")))
+        {
+            let d = depth(i);
+            let end = (i + 1..words.len())
+                .find(|&j| depth(j) < d)
+                .unwrap_or(words.len());
+            let filtered = (i..end).any(|j| depth(j) == d && words[j].is("WHERE"));
+            let from = if at(i + 2).is_some_and(|t| t.is("ONLY")) {
+                i + 3
+            } else {
+                i + 2
+            };
+            if let Some((name, _)) = name_at(&words, from)
+                && !filtered
+                && !new(&name)
+            {
+                out.push((statement[i].0, name));
             }
         }
     }
@@ -111,8 +114,13 @@ fn name_at(words: &[&Tok], i: usize) -> Option<(String, usize)> {
     Some((parts.join("."), j))
 }
 
-fn last(name: &str) -> String {
-    name.rsplit('.').next().unwrap_or(name).to_lowercase()
+/// A table's name to compare with: lower case, without the default schema (`public`, SQLite's `main`).
+fn plain(name: &str) -> String {
+    let name = name.to_lowercase();
+    ["public.", "main."]
+        .iter()
+        .find_map(|schema| name.strip_prefix(schema))
+        .map_or_else(|| name.clone(), str::to_string)
 }
 
 /// Top-level statements, each token with its line and its parenthesis depth. In a `CREATE` statement a `BEGIN` opens
@@ -300,10 +308,37 @@ mod tests {
     }
 
     #[test]
+    fn only_a_table_this_migration_really_created_is_exempt() {
+        // Another schema's table of the same name, and one that may already exist, keep their rows.
+        assert_eq!(
+            found("CREATE TABLE tmp.t (a int);\nDELETE FROM public.t;"),
+            [(2, "public.t".to_string())]
+        );
+        assert_eq!(
+            found("CREATE TABLE IF NOT EXISTS t (a int);\nDELETE FROM t;"),
+            [(2, "t".to_string())]
+        );
+        assert!(found("CREATE TABLE t (a int);\nDELETE FROM public.t;").is_empty());
+    }
+
+    #[test]
+    fn a_delete_inside_a_with_clause_is_read_too() {
+        assert_eq!(
+            found("WITH gone AS (DELETE FROM t RETURNING *) SELECT count(*) FROM gone;"),
+            [(1, "t".to_string())]
+        );
+        assert!(found("WITH gone AS (DELETE FROM t WHERE a = 1 RETURNING *) SELECT 1;").is_empty());
+        // The outer query's WHERE filters what it reads, not what the DELETE inside removed.
+        assert_eq!(
+            found("WITH gone AS (DELETE FROM t RETURNING *) SELECT * FROM gone WHERE a > 0;"),
+            [(1, "t".to_string())]
+        );
+    }
+
+    #[test]
     fn a_table_the_same_migration_creates_holds_no_rows_from_before() {
         assert!(
-            found("CREATE TABLE IF NOT EXISTS s.t (a int);\nDELETE FROM s.t;\nTRUNCATE t;")
-                .is_empty()
+            found("CREATE TABLE s.t (a int);\nDELETE FROM s.t;\nTRUNCATE TABLE S.T;").is_empty()
         );
         // A statement after a trigger body is read again.
         assert_eq!(

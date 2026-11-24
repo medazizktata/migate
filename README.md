@@ -100,8 +100,9 @@ cascade on delete is an error even without rows (MG104) when the tool renames a 
 (drizzle-orm#4938); Django rebuilds that way too, but only with foreign keys off, so it is exempt. A tool that drops
 the table and creates it again under its own name leaves no trace without rows: Rails 8.1 on SQLite does this, and its
 `change_column_null` deleted a parent's cascading children in our test, so with Rails only a seed shows it (MG105).
-A SQL migration that empties a table outright (a `DELETE` with no `WHERE`, a `TRUNCATE`) is an error from its text alone
-(MG107), rows or not; a table the same migration creates is exempt, and a marker accepts a deliberate emptying.
+A SQL migration that empties a table outright (a `DELETE` with no `WHERE`, also inside a `WITH`, or a `TRUNCATE`) is an
+error from its text (MG107), rows or not, in a check with a `[sandbox]` section; a table the same migration creates is
+exempt, and a marker accepts a deliberate emptying.
 
 An intended breaking change (the contract step of expand/contract) is accepted by a comment in the new migration, naming
 one rule and one object, with a reason:
