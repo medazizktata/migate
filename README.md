@@ -228,8 +228,9 @@ Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--fo
 - Rust; Apache-2.0; pure open source, no revenue.
 
 ## Development
-- Rust is pinned in `rust-toolchain.toml` (1.93.1, what rustup already has on the development Mac). `just doctor` shows
-  which cargo, rustc, clippy and rustfmt your shell really uses; they should all match the pin (see "Known local issue").
+- Rust is pinned in `rust-toolchain.toml` (1.93.1). `scripts/check.sh` and the pre-commit hook run on that toolchain
+  whatever the PATH says (`scripts/pinned-toolchain.sh`): they put rustup's tools first and refuse a cargo, clippy or
+  rustfmt of another build, since a newer clippy passes what CI's fails. `just doctor` shows what your shell resolves.
 - `just` lists the usual commands: `just check`, `just test`, `just lint`, `just fmt`. Run `just hooks` once per clone to
   enable the hooks in `.githooks`: pre-commit (format, clippy, docs, tests) and commit-msg (the message rule in
   `CLAUDE.md`). Skip it if your global `core.hooksPath` already calls a repository's `.githooks`.
@@ -237,18 +238,16 @@ Exit codes: 0 clean, 2 errors found, 3 could not check. `--format json` or `--fo
 - `bash scripts/check.sh` runs every check, the same way CI does: rustfmt, clippy (lints and type checks, `-D warnings`),
   rustdoc, tests, the core dependency rule, cargo-deny (advisories, licences, sources), shellcheck, actionlint and typos.
   A missing tool fails the run; `MIGATE_ALLOW_MISSING=1` runs what is installed.
-- CI (`.github/workflows/ci.yml`) runs that script and checks the minimum Rust version (1.89); its actions are pinned to
-  commit SHAs.
+- CI (`.github/workflows/ci.yml`) runs that script, checks the minimum Rust version (1.89) and runs the PostgreSQL
+  tests on 15 to 18; its actions are pinned to commit SHAs. It runs on GitHub's runners, and a run that fails there runs
+  again on a self-hosted runner (`docs/ci-runner.md`).
 - Every rule migate enforces gets a case it must fail and one it must pass, and is shown failing by deliberate sabotage
   before it is trusted.
 
-**Known local issue (development Mac):** `/opt/homebrew/bin` comes before rustup's `~/.cargo/bin` on the PATH, so cargo
-resolves to the pinned 1.93.1 while rustc, clippy and rustfmt resolve to Homebrew's 1.99 (`just doctor` shows it).
-Builds work, but local lints can differ from CI. A fix was applied and then undone by the owner on 2026-11-19 (TASK-42
-has both): rustup's default set to Homebrew's Rust linked as a toolchain, plus rustup proxies for rustc, rustdoc, rustfmt
-and clippy in `~/.local/bin`.
+**Known local issue (development Mac):** `/opt/homebrew/bin` comes before rustup's `~/.cargo/bin` on the PATH, so a
+plain `cargo clippy` in a shell runs Homebrew's newer clippy. The checks and the hook are not affected (they pin the
+toolchain themselves); commands typed by hand are. TASK-42 holds the history.
 
 ## Next
-- Both de-risking spikes are done (`docs/research/spike-7.md`, `docs/research/spike-31.md`): real migrators run in the
-  throwaway-database flow, and the mixed-version test catches what a schema diff cannot (Rails needs the old version
-  booted before the migration). The first release's build tasks are next.
+- The first release, 0.1.0 (`docs/releasing.md`): the work so far is tried on real projects (`docs/end-to-end-testing/`);
+  what remains is building the release binary.
