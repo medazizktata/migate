@@ -42,11 +42,12 @@ One document per run, named by its date.
 | 11 | 2026-11-21 | Dogfood 5 | `2026-11-21-dogfood-5.md` |
 | 12 | 2026-11-22 | Rollback readback on the origin project | `2026-11-22-rollback-readback.md` |
 | 13 | 2026-11-22 to 23 | Dogfood 6: twelve profiles, real PostgreSQL projects, two open-source projects, blind labels | `2026-11-23-dogfood-6.md` |
-| 14 | 2026-11-23 | Static checks over five open-source projects' migration history | `2026-11-23-static-history-sweep.md` |
+| 14 | 2026-11-23 | Static checks over eight open-source projects' migration history | `2026-11-23-static-history-sweep.md` |
+| 15 | 2026-11-24 | documenso with its own test suite: the primary check on outside code | `2026-11-24-documenso-own-tests.md` |
 
 ## Not covered yet
 
-- A real PostgreSQL project's own test suite (dogfood 6 ran real PostgreSQL projects, but none with runnable tests).
+- A PostgreSQL project's own test suite beyond one project and one migrator (run 15 is documenso, Prisma).
 - MG002, MG003, MG007 end to end, MG105 by a table rebuild, MG801 and MG805, and a project's own contract-marker
   convention.
 - One-off statements (`ALTER TABLE ... DROP COLUMN` and the like) inside TypeScript, Python or Ruby migrations, for the

@@ -5,7 +5,7 @@ Run 14 of migate's end-to-end runs. How runs are judged, and the others: `README
 ## What was run
 
 migate's checks without a sandbox (ledger, order, dependency graphs) over the last 40 commits that touched migrations on
-the main line of five open-source projects, each commit against its parent as the base. Merged history deployed, so an
+the main line of eight open-source projects, each commit against its parent as the base. Merged history deployed, so an
 error there is a candidate false alarm, and a commit migate could not check is a candidate bug.
 
 | Project | Migrator | Commits |
