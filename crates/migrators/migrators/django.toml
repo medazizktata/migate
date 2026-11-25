@@ -16,6 +16,7 @@ checksum = "none"
 list = '(?m)^[ \t]*dependencies[ \t]*(?::[^=\n]*)?=[ \t]*[\[(]'
 parent = '''\(\s*['"](?P<group>[\w.]+)['"]\s*,\s*['"](?P<id>[\w.]+)['"]\s*\)'''
 skip = '^__'
+comment = '#'
 [history]
 kind = "full"
 # shortcut: `||` works on SQLite and Postgres, not MySQL (CONCAT); add a per-engine query when MySQL lands.

@@ -43,13 +43,15 @@ enum OrderName {
 
 /// A migration's parents, read from its own file: the bracketed list `list` opens (the pattern matches up to and
 /// including the list's `[` or `(`, which ends at its matching bracket), each parent matching `parent` with named groups `group`
-/// and `id`. Ids matching `skip` name no concrete migration.
+/// and `id`. Ids matching `skip` name no concrete migration. A line comment (from `comment` to the line's end) is
+/// not part of the list.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GraphDef {
     list: String,
     parent: String,
     skip: Option<String>,
+    comment: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +59,7 @@ struct Graph {
     list: Regex,
     parent: Regex,
     skip: Option<Regex>,
+    comment: Option<String>,
 }
 
 /// Migrations listed in one JSON journal (the file `path_pattern` matches) rather than one file each: the array
@@ -238,6 +241,7 @@ impl Migrator {
                     list: regex("list", &g.list)?,
                     parent,
                     skip: g.skip.as_deref().map(|s| regex("skip", s)).transpose()?,
+                    comment: g.comment.clone().filter(|c| !c.is_empty()),
                 })
             }
             None => None,
@@ -623,14 +627,17 @@ fn graph_parents(text: &str, g: &Graph) -> Vec<String> {
     // in one must not end the list, and a dependency commented out is not a parent.
     let mut depth = 1usize;
     let mut list = String::new();
-    let mut chars = text[open..].chars();
-    while let Some(ch) = chars.next() {
+    let mut chars = text[open..].char_indices();
+    while let Some((i, ch)) = chars.next() {
+        if g.comment
+            .as_deref()
+            .is_some_and(|c| text[open + i..].starts_with(c))
+        {
+            chars.by_ref().find(|&(_, c)| c == '\n');
+            list.push('\n');
+            continue;
+        }
         match ch {
-            '#' => {
-                chars.by_ref().find(|&c| c == '\n');
-                list.push('\n');
-                continue;
-            }
             '[' | '(' | '{' => depth += 1,
             ']' | ')' | '}' => {
                 depth -= 1;
