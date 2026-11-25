@@ -113,8 +113,9 @@ one rule and one object, with a reason:
 ALTER TABLE users DROP COLUMN legacy;
 ```
 
-The finding stays in the report as a note. A marker with no reason, or one that matches nothing, is an error (MG901),
-and nothing accepts a failing old-version test.
+The finding stays in the report as a note. A marker with no reason, one that matches nothing, or one that matches
+several objects (`users.legacy` when two schemas each drop one: write `public.users.legacy`) is an error (MG901), and
+nothing accepts a failing old-version test.
 
 Triggers a migration adds or changes are always errors (MG503, MG504): nothing migate can see proves the running app
 never writes what a new trigger refuses. Not the rows the database already holds, either: a migration that fills a new

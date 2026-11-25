@@ -88,23 +88,52 @@ pub fn apply(findings: Vec<Finding>, markers: &[Marker]) -> Vec<Finding> {
     let matches = |m: &Marker, f: &Finding| {
         m.rule == f.rule && (f.object == m.object || f.object.ends_with(&format!(".{}", m.object)))
     };
-    let mut out: Vec<Finding> = findings
-        .into_iter()
-        .map(|f| match markers.iter().find(|m| matches(m, &f)) {
-            Some(m) if !FINAL.contains(&f.rule) && f.severity > Severity::Note => Finding::new(
-                f.rule,
-                Severity::Note,
-                f.object,
-                format!(
-                    "accepted by the contract at {}: {} (was: {})",
-                    m.at, m.reason, f.message
-                ),
-            ),
-            _ => f,
+    // A marker names one object: one that matches several (a table in two schemas) accepts none of them.
+    let several: Vec<Option<String>> = markers
+        .iter()
+        .map(|m| {
+            let objects: std::collections::BTreeSet<&str> = findings
+                .iter()
+                .filter(|f| matches(m, f))
+                .map(|f| f.object.as_str())
+                .collect();
+            (objects.len() > 1).then(|| objects.into_iter().collect::<Vec<_>>().join(", "))
         })
         .collect();
-    for m in markers {
-        if !out.iter().any(|f| {
+    let mut out: Vec<Finding> = findings
+        .into_iter()
+        .map(|f| {
+            match markers
+                .iter()
+                .zip(&several)
+                .find(|(m, s)| s.is_none() && matches(m, &f))
+                .map(|(m, _)| m)
+            {
+                Some(m) if !FINAL.contains(&f.rule) && f.severity > Severity::Note => Finding::new(
+                    f.rule,
+                    Severity::Note,
+                    f.object,
+                    format!(
+                        "accepted by the contract at {}: {} (was: {})",
+                        m.at, m.reason, f.message
+                    ),
+                ),
+                _ => f,
+            }
+        })
+        .collect();
+    for (m, s) in markers.iter().zip(&several) {
+        if let Some(objects) = s {
+            out.push(Finding::new(
+                "MG901",
+                Severity::Error,
+                m.at.clone(),
+                format!(
+                    "contract marker matches several objects ({} {}: {objects}): name the one it accepts in full",
+                    m.rule, m.object
+                ),
+            ));
+        } else if !out.iter().any(|f| {
             f.message
                 .starts_with(&format!("accepted by the contract at {}:", m.at))
         }) {
@@ -207,6 +236,44 @@ mod tests {
         assert_eq!(
             rules(&out),
             [("MG201", Severity::Error), ("MG901", Severity::Error)]
+        );
+    }
+
+    #[test]
+    fn a_marker_matching_several_objects_accepts_none() {
+        let drop = |o: &str| Finding::new("MG201", Severity::Error, o, "column dropped");
+        let two = || vec![drop("public.users.legacy"), drop("app.users.legacy")];
+        for object in ["users.legacy", "legacy"] {
+            let (markers, _) = parse(
+                "m.sql",
+                &format!("-- migate: contract drop-column {object} -- why"),
+            );
+            let out = apply(two(), &markers);
+            assert_eq!(
+                rules(&out),
+                [
+                    ("MG201", Severity::Error),
+                    ("MG201", Severity::Error),
+                    ("MG901", Severity::Error)
+                ],
+                "{object}"
+            );
+            assert!(
+                out[2]
+                    .message
+                    .contains("app.users.legacy, public.users.legacy"),
+                "{}",
+                out[2].message
+            );
+        }
+        // Named in full, it accepts its own object and leaves the other one alone.
+        let (markers, _) = parse(
+            "m.sql",
+            "-- migate: contract drop-column public.users.legacy -- why",
+        );
+        assert_eq!(
+            rules(&apply(two(), &markers)),
+            [("MG201", Severity::Note), ("MG201", Severity::Error)]
         );
     }
 

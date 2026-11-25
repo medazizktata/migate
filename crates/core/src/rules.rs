@@ -314,7 +314,7 @@ pub const RULES: &[Rule] = &[
     Rule {
         id: "MG901",
         name: "bad-contract-marker",
-        description: "A contract marker has no reason, names a rule that cannot be accepted, or matches no finding. Markers accept one intended change; a stale one would hide the next.",
+        description: "A contract marker has no reason, names a rule that cannot be accepted, matches no finding, or matches several objects (name the schema). Markers accept one intended change; a stale or loose one would hide the next.",
         axes: "",
     },
 ];
