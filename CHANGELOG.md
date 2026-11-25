@@ -1,10 +1,6 @@
-# 0.1.0 release notes (draft)
+# Changelog
 
-The words for the `CHANGELOG.md` section that `just release 0.1.0` creates (step 3 of `releasing.md`): that command
-lists commit subjects, which for a first release are too many to read. Replace its list with this, and remove this
-file in the release commit.
-
-## migate 0.1.0
+## v0.1.0 (2026-11-25)
 
 The first release of migate, an offline release gate for database migrations: it blocks a change whose migrations
 would break the version still serving traffic, or lose data, before it deploys.
@@ -28,11 +24,12 @@ would break the version still serving traffic, or lose data, before it deploys.
 files: Payload, Prisma, Drizzle, Wrangler D1, Rails, Django, Supabase and dbmate. A binary for x86-64 Linux.
 
 **How it was tested.** Beyond its test suite, every check was tried on real projects (`end-to-end-testing/`): a
-Payload app on D1 over 36 cases, every bundled tool but dbmate run with its real CLI on at least one engine it supports
-(Django and Rails on both; dbmate's apply logic was reproduced in a script), real PostgreSQL projects, documenso run with its own API tests on four of its changes (both breaks
-it shipped caught, both safe changes passed), and the history of eight open-source projects; findings on projects without runnable tests were labelled by independent reviewers.
-Where tests decide, the latest runs had no missed break and one false alarm: a CHECK added to an existing column
-that the old version's writes satisfy (a known limit, below).
+Payload app on D1 over 36 cases, every bundled tool but dbmate run with its real CLI on at least one engine it
+supports (Django and Rails on both; dbmate's apply logic was reproduced in a script), real PostgreSQL projects,
+documenso run with its own API tests on four of its changes (both breaks it shipped caught, both safe changes passed),
+and the history of eight open-source projects; findings on projects without runnable tests were labelled by
+independent reviewers. Where tests decide, the latest runs had no missed break and one false alarm: a CHECK added to
+an existing column that the old version's writes satisfy (a known limit, below).
 
 **Known limits.**
 - The sandbox needs the project's own migrate command, and the base version's tests to run offline against a database

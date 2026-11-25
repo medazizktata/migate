@@ -495,7 +495,7 @@ checksum = "c2a86d3146ed3995b5913c414f6664344b9617457320782e64f0bb44afd49d74"
 
 [[package]]
 name = "migate"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "migate-core",
@@ -510,7 +510,7 @@ dependencies = [
 
 [[package]]
 name = "migate-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "jsonschema",
  "schemars",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "migate-engine-postgres"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "migate-core",
  "migate-migrators",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "migate-engine-sqlite"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "migate-core",
  "rusqlite",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "migate-migrators"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "migate-core",
  "regex",
