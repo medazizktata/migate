@@ -619,29 +619,31 @@ fn graph_parents(text: &str, g: &Graph) -> Vec<String> {
     else {
         return Vec::new();
     };
-    // The list ends at its matching bracket; anything nested inside it is balanced.
-    // A bracket in a comment does not count: `# see the note :)` must not end the list.
+    // The list ends at its matching bracket; anything nested inside it is balanced. Comments are left out: a bracket
+    // in one must not end the list, and a dependency commented out is not a parent.
     let mut depth = 1usize;
-    let mut end = text.len();
-    let mut chars = text[open..].char_indices();
-    while let Some((i, ch)) = chars.next() {
+    let mut list = String::new();
+    let mut chars = text[open..].chars();
+    while let Some(ch) = chars.next() {
         match ch {
             '#' => {
-                chars.by_ref().find(|&(_, c)| c == '\n');
+                chars.by_ref().find(|&c| c == '\n');
+                list.push('\n');
+                continue;
             }
             '[' | '(' | '{' => depth += 1,
             ']' | ')' | '}' => {
                 depth -= 1;
                 if depth == 0 {
-                    end = open + i;
                     break;
                 }
             }
             _ => {}
         }
+        list.push(ch);
     }
     g.parent
-        .captures_iter(&text[open..end])
+        .captures_iter(&list)
         .filter(|c| !g.skip.as_ref().is_some_and(|s| s.is_match(&c["id"])))
         .map(|c| format!("{}/{}", &c["group"], &c["id"]))
         .collect()
@@ -1208,6 +1210,8 @@ mod tests {
             "class Migration(migrations.Migration):\n    dependencies = (\n        ('shop', '0001_initial'),\n    )\n    operations = [migrations.RunPython(f, ('shop', '0000_gone'))]\n".to_string(),
             // A closing bracket of any kind in a comment inside the list (found by a blind review).
             "class Migration(migrations.Migration):\n    dependencies = [\n        # see the note :) } ]\n        ('shop', '0001_initial'),\n    ]\n".to_string(),
+            // A dependency commented out inside the list is not a parent.
+            "class Migration(migrations.Migration):\n    dependencies = [\n        ('shop', '0001_initial'),\n        # ('shop', '0000_gone'),\n    ]\n".to_string(),
         ] {
             let got = m
                 .migrations(&files(&[
@@ -1217,6 +1221,15 @@ mod tests {
                 .unwrap();
             assert_eq!(got[1].parents, ["shop/0001_initial"], "{text}");
         }
+        // Its only dependency commented out: a second root, which Django refuses as two leaf nodes.
+        let only = "class Migration(migrations.Migration):\n    dependencies = [\n        # ('shop', '0001_initial'),\n    ]\n";
+        let got = m
+            .migrations(&files(&[
+                ("shop/migrations/0001_initial.py", D1),
+                ("shop/migrations/0002_add_a.py", only),
+            ]))
+            .unwrap();
+        assert!(got[1].parents.is_empty(), "{:?}", got[1].parents);
     }
 
     #[test]
