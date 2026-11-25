@@ -883,6 +883,11 @@ impl engine::Database for File {
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String> {
         unmodelled(&self.0).map_err(|e| e.0)
     }
+    fn privileges(
+        &self,
+    ) -> Result<std::collections::BTreeSet<migate_core::privilege::Privilege>, String> {
+        Ok(std::collections::BTreeSet::new())
+    }
     fn schema_sql(&self) -> Result<BTreeMap<String, String>, String> {
         schema_sql(&self.0).map_err(|e| e.0)
     }

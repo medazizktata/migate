@@ -401,6 +401,18 @@ impl engine::Database for Db<'_> {
         Ok(out)
     }
 
+    fn privileges(&self) -> Result<BTreeSet<migate_core::privilege::Privilege>, String> {
+        Ok(rows(&self.0.bin, &self.0.url, &privileges_query())?
+            .iter()
+            .map(|r| migate_core::privilege::Privilege {
+                kind: s(r, "kind").into(),
+                object: s(r, "object").into(),
+                grantee: s(r, "grantee").into(),
+                privilege: s(r, "privilege").into(),
+            })
+            .collect())
+    }
+
     fn drop_all_but(&self, keep: &str) -> Result<(), String> {
         let kept: BTreeSet<String> = keep
             .split(|c: char| !(c.is_alphanumeric() || c == '_'))
@@ -582,6 +594,30 @@ const TABLE: &str = "c.relkind in ('r', 'p') and not c.relispartition";
 
 /// One query listing every catalogue object outside the model as (`key`, `def`). Where a catalogue's columns differ
 /// between versions, the whole row as JSON is the definition: a before/after comparison on one server needs no more.
+/// Every privilege on the project's tables (views, sequences and foreign tables too), columns, routines and schemas,
+/// with each object's defaults filled in (`acldefault`: the owner's rights, PUBLIC's EXECUTE on a routine), for roles
+/// other than superusers, which no privilege restricts (MG211).
+fn privileges_query() -> String {
+    let not_ext = NOT_EXTENSION.replace("{oid}", "p.oid");
+    format!(
+        "select x.kind, x.object, coalesce(r.rolname, 'PUBLIC') as grantee, x.privilege from ( \
+         select 'table' as kind, n.nspname || '.' || c.relname as object, a.grantee, a.privilege_type as privilege \
+         from pg_class c join pg_namespace n on n.oid = c.relnamespace, \
+         aclexplode(coalesce(c.relacl, acldefault((case c.relkind when 'S' then 's' else 'r' end)::\"char\", c.relowner))) a \
+         where c.relkind in ('r', 'p', 'v', 'm', 'S', 'f') and {USER_SCHEMA} \
+         union all select 'column', n.nspname || '.' || c.relname || '.' || t.attname, a.grantee, a.privilege_type \
+         from pg_attribute t join pg_class c on c.oid = t.attrelid join pg_namespace n on n.oid = c.relnamespace, \
+         aclexplode(t.attacl) a where t.attacl is not null and t.attnum > 0 and not t.attisdropped and {USER_SCHEMA} \
+         union all select 'routine', n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) \
+         || ')', a.grantee, a.privilege_type \
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace, \
+         aclexplode(coalesce(p.proacl, acldefault('f'::\"char\", p.proowner))) a where {USER_SCHEMA} and {not_ext} \
+         union all select 'schema', n.nspname, a.grantee, a.privilege_type \
+         from pg_namespace n, aclexplode(coalesce(n.nspacl, acldefault('n'::\"char\", n.nspowner))) a where {USER_SCHEMA} \
+         ) x left join pg_roles r on r.oid = x.grantee where x.grantee = 0 or not r.rolsuper"
+    )
+}
+
 fn unmodelled_query() -> String {
     let not_ext = |oid: &str| NOT_EXTENSION.replace("{oid}", oid);
     let on_table = "join pg_class c on c.oid = {rel} join pg_namespace n on n.oid = c.relnamespace";
@@ -686,26 +722,6 @@ fn unmodelled_query() -> String {
              || format_type(a.atttypid, a.atttypmod), ', ' order by a.attnum) from pg_attribute a \
              where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped) \
              from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relkind = 'f' and {USER_SCHEMA}"
-        ),
-        // Grants: an old version that loses SELECT breaks as surely as one that loses a column.
-        format!(
-            "select 'grants ' || {named}, coalesce(c.relacl::text, '') || coalesce((select ' ' \
-             || string_agg(a.attname || a.attacl::text, ' ' order by a.attnum) from pg_attribute a \
-             where a.attrelid = c.oid and a.attacl is not null), '') \
-             from pg_class c join pg_namespace n on n.oid = c.relnamespace \
-             where c.relkind in ('r', 'p', 'v', 'm', 'S', 'f') and {USER_SCHEMA} and (c.relacl is not null \
-             or exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attacl is not null))"
-        ),
-        format!(
-            "select 'grants on routine ' || n.nspname || '.' || p.proname || '(' \
-             || pg_get_function_identity_arguments(p.oid) || ')', p.proacl::text \
-             from pg_proc p join pg_namespace n on n.oid = p.pronamespace \
-             where p.proacl is not null and {USER_SCHEMA} and {}",
-            not_ext("p.oid")
-        ),
-        format!(
-            "select 'grants on schema ' || n.nspname, n.nspacl::text from pg_namespace n \
-             where n.nspacl is not null and {USER_SCHEMA}"
         ),
     ];
     let all: Vec<String> = parts

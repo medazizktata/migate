@@ -74,6 +74,10 @@ pub trait Database {
     /// Every object the schema model does not cover, as `category name` -> its definition text, so a change to one is
     /// reported as not checked rather than passing in silence.
     fn unmodelled(&self) -> Result<BTreeMap<String, String>, String>;
+    /// Every privilege a non-superuser role holds on the project's objects, the engine's defaults included. Empty for
+    /// an engine without privileges.
+    fn privileges(&self)
+    -> Result<std::collections::BTreeSet<crate::privilege::Privilege>, String>;
     /// Drop every table and view not named in `keep` (a query, such as the history query). Throwaway databases only.
     fn drop_all_but(&self, keep: &str) -> Result<(), String>;
 }

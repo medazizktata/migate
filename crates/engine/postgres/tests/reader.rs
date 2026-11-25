@@ -395,7 +395,6 @@ fn objects_outside_the_model_are_listed_not_dropped() {
         "collation public.ci",
         "inheritance public.child",
         "index with INCLUDE columns public.rooms.rooms_owner_inc",
-        "grants public.rooms",
     ] {
         assert!(
             got.contains_key(key),
@@ -403,6 +402,30 @@ fn objects_outside_the_model_are_listed_not_dropped() {
             got.keys().collect::<Vec<_>>()
         );
     }
+    // Grants are judged (MG211), not listed: each privilege with the defaults filled in, superusers left out.
+    assert!(!got.keys().any(|k| k.starts_with("grants")), "{got:#?}");
+    let privileges = db.privileges().unwrap();
+    let has = |kind: &str, object: &str, grantee: &str, privilege: &str| {
+        privileges.iter().any(|p| {
+            p.kind == kind && p.object == object && p.grantee == grantee && p.privilege == privilege
+        })
+    };
+    assert!(
+        has("table", "public.rooms", "reader_role", "SELECT"),
+        "{privileges:#?}"
+    );
+    assert!(
+        has("routine", "public.noop()", "PUBLIC", "EXECUTE"),
+        "{privileges:#?}"
+    );
+    assert!(
+        has("schema", "public", "PUBLIC", "USAGE"),
+        "{privileges:#?}"
+    );
+    assert!(
+        !privileges.iter().any(|p| p.grantee == "postgres"),
+        "{privileges:#?}"
+    );
     let s = server.snapshot().unwrap();
     let routines: Vec<&str> = s
         .objects()

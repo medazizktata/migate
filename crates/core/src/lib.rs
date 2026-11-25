@@ -12,6 +12,7 @@ pub mod hash;
 pub mod history;
 pub mod ledger;
 pub mod order;
+pub mod privilege;
 pub mod rules;
 pub mod schema;
 

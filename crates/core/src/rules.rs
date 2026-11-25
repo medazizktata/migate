@@ -126,6 +126,12 @@ pub const RULES: &[Rule] = &[
         axes: "BLD",
     },
     Rule {
+        id: "MG211",
+        name: "privilege-revoked",
+        description: "A role lost a privilege on an object that is still there (REVOKE, or a table created again without its grants). The version still serving traffic fails there if it connects as that role. A warning when PUBLIC loses one that named roles still hold: narrowing it to the app's own role is common. Grant first, then revoke in a later release.",
+        axes: "B",
+    },
+    Rule {
         id: "MG212",
         name: "dropped-column-still-used",
         description: "A dropped (or renamed) column the version still serving traffic uses, by its ORM's own rule (a model field, a schema entry, a raw query naming it; Rails: any column not in ignored_columns). No contract marker can accept it: stop using the column in one release, drop it in the next.",
@@ -266,7 +272,7 @@ pub const RULES: &[Rule] = &[
     Rule {
         id: "MG801",
         name: "not-checked",
-        description: "A check could not judge part of the change, and says so instead of passing it: the migration changed an object the schema model does not cover (a policy, a domain, a grant, an exclusion constraint and the like), so only the base version's tests judged it (not even they, for row-level security or a grant: they connect as a superuser, which no policy or grant restricts, unless they switch to another role); or, with target_version set, a migration that is not a SQL file could not be read for syntax newer than production's engine (MG701).",
+        description: "A check could not judge part of the change, and says so instead of passing it: the migration changed an object the schema model does not cover (a policy, a domain, an exclusion constraint and the like), so only the base version's tests judged it (not even they, for row-level security: they connect as a superuser, which no policy restricts, unless they switch to another role); or, with target_version set, a migration that is not a SQL file could not be read for syntax newer than production's engine (MG701).",
         axes: "",
     },
     Rule {

@@ -182,9 +182,11 @@ test = "pnpm test"
 ```
 
 The schema diff covers tables, columns, keys, constraints, indexes, views, triggers, routines, enums and sequences.
-A change to anything else (a policy, a grant, a domain, an exclusion constraint, a partition and the like) is named
-as not checked (MG801): only the base version's tests judged it. Not even they judge row-level security or a grant:
-they connect as the sandbox's superuser, which no policy or grant restricts, unless they switch to another role.
+Grants are compared too: a role that loses a privilege on an object still there is an error (MG211), since the base
+version fails there if it connects as that role. A change to anything else (a policy, a domain, an exclusion
+constraint, a partition and the like) is named as not checked (MG801): only the base version's tests judged it. Not
+even they judge row-level security: they connect as the sandbox's superuser, which no policy restricts, unless they
+switch to another role.
 
 Production may run an older engine than the sandbox. Set `target_version` under `[sandbox]` (`"3.37.2"` for SQLite,
 `"15"` for PostgreSQL): a SQL migration using syntax that version lacks is an error (MG701), PostgreSQL runs on that

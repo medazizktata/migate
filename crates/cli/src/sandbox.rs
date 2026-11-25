@@ -366,6 +366,7 @@ pub fn run(
     }
     let rows_before = project_keys(db.row_counts()?);
     let unmodelled_before = db.unmodelled()?;
+    let privileges_before = db.privileges()?;
     let values_before = project_keys(db.value_counts()?);
     let schema_before = if unread {
         db.schema_sql()?
@@ -522,6 +523,24 @@ pub fn run(
         }
     }
     judge_triggers(&mut findings, &changes, db.as_ref());
+    let columns_after = after
+        .objects()
+        .iter()
+        .filter(|o| o.kind() == Kind::Column)
+        .map(|o| {
+            format!(
+                "{}.{}.{}",
+                o.namespace,
+                o.parent.as_deref().unwrap_or_default(),
+                o.name
+            )
+        })
+        .collect();
+    findings.extend(migate_core::privilege::lost(
+        &privileges_before,
+        &db.privileges()?,
+        &columns_after,
+    ));
     let unmodelled_after = db.unmodelled()?;
     for key in unmodelled_before
         .keys()
@@ -534,13 +553,13 @@ pub fn run(
             (_, None) => "removed",
             _ => "changed",
         };
-        // The tests connect as the sandbox's superuser, which neither row-level security nor a grant restricts.
-        let judged = if ["policy ", "row-level security ", "grants "]
+        // The tests connect as the sandbox's superuser, which row-level security never restricts.
+        let judged = if ["policy ", "row-level security "]
             .iter()
             .any(|p| key.starts_with(p))
         {
-            "and the tests connect as a superuser, which no policy or grant restricts: unless they switch to another \
-             role, not judged by the base version's tests either"
+            "and the tests connect as a superuser, which no policy restricts: unless they switch to another role, \
+             not judged by the base version's tests either"
         } else {
             "so only the base version's tests judged it"
         };

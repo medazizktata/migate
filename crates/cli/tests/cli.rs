@@ -2370,20 +2370,17 @@ fn a_base_suite_that_always_fails_is_still_refused_after_the_retry() {
 fn postgres_says_what_it_did_not_check() {
     // A row-level security policy is outside migate's schema model: the change is named as not checked, never silent.
     let r = pg_repo(
-        "alter table users enable row level security;\ncreate policy none_for_you on users using (false);\n\
-         grant select on users to public;",
+        "alter table users enable row level security;\ncreate policy none_for_you on users using (false);",
     );
     let (_, out, err) = sandbox_check(&r, &[]);
     assert!(
         out.contains("MG801") && out.contains("policy public.users.none_for_you"),
         "{out}{err}"
     );
-    // The tests connect as a superuser, which no policy or grant restricts: they passed here, so they cannot be said
-    // to judge it.
+    // The tests connect as a superuser, which no policy restricts: they passed here, so they cannot be said to judge it.
     for key in [
         "policy public.users.none_for_you",
         "row-level security public.users",
-        "grants public.users",
     ] {
         let line = out.lines().find(|l| l.contains(key)).unwrap_or_default();
         assert!(
@@ -2392,6 +2389,71 @@ fn postgres_says_what_it_did_not_check() {
             "{key}: {out}"
         );
     }
+}
+
+/// A repository whose base grants `app` SELECT and INSERT on `users`, with `second` as the change's migration.
+fn pg_grants_repo(second: &str) -> Repo {
+    let r = Repo::new();
+    r.write("migate.toml", PG_TOML);
+    r.write("apply.sh", PG_APPLY);
+    r.write("old_app.sh", PG_OLD_APP);
+    r.write(
+        "migrations/0001_init.sql",
+        "create role app;\ncreate table users (id serial primary key, email text not null, legacy text);\n\
+         grant select, insert on users to app;\ncreate function hello() returns int language sql as 'select 1';",
+    );
+    r.commit("init");
+    r.git(&["checkout", "-q", "-b", "pr"]);
+    r.write("migrations/0002_change.sql", second);
+    r.commit("change");
+    r
+}
+
+#[test]
+fn postgres_a_revoked_privilege_the_old_version_may_need_is_mg211() {
+    // The tests connect as a superuser and pass; the diff of privileges is what sees the revoke.
+    let (code, out, err) = sandbox_check(&pg_grants_repo("revoke insert on users from app;"), &[]);
+    assert_eq!(code, 2, "{out}{err}");
+    let line = out
+        .lines()
+        .find(|l| l.contains("MG211"))
+        .unwrap_or_default();
+    assert!(
+        line.starts_with("error")
+            && line.contains("public.users (migrations/0002_change.sql:1)")
+            && line.contains("app loses INSERT on this table"),
+        "{out}"
+    );
+    let accepted = pg_grants_repo(
+        "-- migate: contract privilege-revoked users -- the app connects as owner since v3\n\
+         revoke insert on users from app;",
+    );
+    let (code, out, err) = sandbox_check(&accepted, &[]);
+    assert_eq!(code, 0, "{out}{err}");
+    // Granting more takes nothing away, and a new owner is no loss: the superuser that owned it needs no privilege.
+    for change in [
+        "grant update on users to app;",
+        "alter table users owner to app;",
+    ] {
+        let (code, out, err) = sandbox_check(&pg_grants_repo(change), &[]);
+        assert_eq!(code, 0, "{change}: {out}{err}");
+        assert!(!out.contains("MG211"), "{change}: {out}");
+    }
+    // PUBLIC's EXECUTE narrowed to the app's role: a warning, not a block.
+    let (code, out, err) = sandbox_check(
+        &pg_grants_repo(
+            "revoke execute on function hello() from public;\ngrant execute on function hello() to app;",
+        ),
+        &[],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.lines().any(|l| l.starts_with("warning")
+            && l.contains("MG211")
+            && l.contains("public.hello()")
+            && l.contains("every role but app (PUBLIC) loses EXECUTE")),
+        "{out}"
+    );
 }
 
 #[test]
