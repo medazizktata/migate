@@ -592,11 +592,10 @@ const NOT_EXTENSION: &str =
 /// A table the project defines: ordinary or partitioned, not one partition of another.
 const TABLE: &str = "c.relkind in ('r', 'p') and not c.relispartition";
 
-/// One query listing every catalogue object outside the model as (`key`, `def`). Where a catalogue's columns differ
-/// between versions, the whole row as JSON is the definition: a before/after comparison on one server needs no more.
 /// Every privilege on the project's tables (views, sequences and foreign tables too), columns, routines and schemas,
 /// with each object's defaults filled in (`acldefault`: the owner's rights, PUBLIC's EXECUTE on a routine), for roles
-/// other than superusers, which no privilege restricts (MG211).
+/// other than superusers, which no privilege restricts (MG211). A role holds what it has through the roles it inherits
+/// from (`pg_has_role` with USAGE follows the membership chain and its INHERIT settings, on every version).
 fn privileges_query() -> String {
     let not_ext = NOT_EXTENSION.replace("{oid}", "p.oid");
     format!(
@@ -614,10 +613,13 @@ fn privileges_query() -> String {
          aclexplode(coalesce(p.proacl, acldefault('f'::\"char\", p.proowner))) a where {USER_SCHEMA} and {not_ext} \
          union all select 'schema', n.nspname, a.grantee, a.privilege_type \
          from pg_namespace n, aclexplode(coalesce(n.nspacl, acldefault('n'::\"char\", n.nspowner))) a where {USER_SCHEMA} \
-         ) x left join pg_roles r on r.oid = x.grantee where x.grantee = 0 or not r.rolsuper"
+         ) x left join pg_roles r on x.grantee <> 0 and pg_has_role(r.oid, x.grantee, 'USAGE') \
+         where x.grantee = 0 or (r.oid is not null and not r.rolsuper)"
     )
 }
 
+/// One query listing every catalogue object outside the model as (`key`, `def`). Where a catalogue's columns differ
+/// between versions, the whole row as JSON is the definition: a before/after comparison on one server needs no more.
 fn unmodelled_query() -> String {
     let not_ext = |oid: &str| NOT_EXTENSION.replace("{oid}", oid);
     let on_table = "join pg_class c on c.oid = {rel} join pg_namespace n on n.oid = c.relnamespace";

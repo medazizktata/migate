@@ -376,7 +376,10 @@ fn objects_outside_the_model_are_listed_not_dropped() {
          create collation ci (provider = icu, locale = 'und-u-ks-level2', deterministic = false);
          create table child () inherits (rooms);
          create index rooms_owner_inc on rooms (owner) include (during);
-         create role reader_role; grant select on rooms to reader_role;",
+         create role reader_role; grant select on rooms to reader_role;
+         create role member_role; grant reader_role to member_role;
+         create role via_member; grant member_role to via_member;
+         create role no_inherit noinherit; grant reader_role to no_inherit;",
     );
     let db = server.open("select 1").unwrap();
     let got = db.unmodelled().unwrap();
@@ -412,6 +415,13 @@ fn objects_outside_the_model_are_listed_not_dropped() {
     };
     assert!(
         has("table", "public.rooms", "reader_role", "SELECT"),
+        "{privileges:#?}"
+    );
+    // Inherited through one membership or two; a NOINHERIT member must SET ROLE first, so it holds nothing itself.
+    assert!(
+        has("table", "public.rooms", "member_role", "SELECT")
+            && has("table", "public.rooms", "via_member", "SELECT")
+            && !has("table", "public.rooms", "no_inherit", "SELECT"),
         "{privileges:#?}"
     );
     assert!(

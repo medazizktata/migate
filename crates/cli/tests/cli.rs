@@ -2430,10 +2430,12 @@ fn postgres_a_revoked_privilege_the_old_version_may_need_is_mg211() {
     );
     let (code, out, err) = sandbox_check(&accepted, &[]);
     assert_eq!(code, 0, "{out}{err}");
-    // Granting more takes nothing away, and a new owner is no loss: the superuser that owned it needs no privilege.
+    // Granting more takes nothing away, a new owner is no loss (the superuser that owned it needs no privilege), and a
+    // role keeps what it now inherits from another.
     for change in [
         "grant update on users to app;",
         "alter table users owner to app;",
+        "create role writers;\ngrant insert on users to writers;\ngrant writers to app;\nrevoke insert on users from app;",
     ] {
         let (code, out, err) = sandbox_check(&pg_grants_repo(change), &[]);
         assert_eq!(code, 0, "{change}: {out}{err}");

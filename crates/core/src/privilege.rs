@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use crate::{Finding, Severity};
 
 /// Who may do what on an object, after the engine's defaults are applied (an owner's implicit rights, PUBLIC's
-/// EXECUTE on a routine). `grantee` is a role name, or `PUBLIC` for every role.
+/// EXECUTE on a routine) and with what a role inherits from the roles it belongs to. `grantee` is a role name, or `PUBLIC` for every role.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Privilege {
     /// `table`, `column`, `routine` or `schema`.
@@ -24,8 +24,6 @@ pub const PUBLIC: &str = "PUBLIC";
 /// every `namespace.table.column` after; a dropped object is reported by the schema diff). A role keeps a privilege
 /// PUBLIC still holds. PUBLIC losing one that named roles hold is a warning: narrowing it to the app's own role is
 /// common, and only the app knows which role it connects as.
-// shortcut: role membership is not followed (a role that inherits from a holder); read pg_auth_members if a project
-// relies on it.
 pub fn lost(
     before: &BTreeSet<Privilege>,
     after: &BTreeSet<Privilege>,
